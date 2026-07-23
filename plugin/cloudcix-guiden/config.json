@@ -1,0 +1,19 @@
+{
+  "name": "CloudCIX Guiden®",
+  "guid": "asc.{7D4A7F73-2BB0-4C0F-82F9-0D0CDA18C621}",
+  "version": "1.4.7",
+  "baseUrl": "",
+  "variations": [
+    {
+      "description": "CloudCIX Guiden® assistant",
+      "EditorsSupport": ["word", "cell", "slide"],
+      "initDataType": "none",
+      "initOnSelectionChanged": false,
+      "isViewer": false,
+      "type": "panelRight",
+      "url": "index.html",
+      "icons": ["resources/icon.png"],
+      "buttons": []
+    }
+  ]
+}
