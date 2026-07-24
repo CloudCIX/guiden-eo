@@ -39,7 +39,8 @@
     busy: false,
     suggestion: null,
     snapshot: null,
-    adapter: null
+    adapter: null,
+    saveFeedbackTimer: null
   };
 
   function $(id) {
@@ -1161,16 +1162,37 @@
     const remember = $("rememberKey").checked;
     const apiKey = $("apiKey").value;
 
-    localStorage.setItem(STORAGE.rememberKey, remember ? "1" : "0");
-    localStorage.setItem(STORAGE.format, $("format").value);
-    localStorage.setItem(STORAGE.tone, $("tone").value);
-    localStorage.setItem(STORAGE.length, $("length").value);
-    if (remember) {
-      localStorage.setItem(STORAGE.apiKey, apiKey);
-    } else {
-      localStorage.removeItem(STORAGE.apiKey);
+    try {
+      localStorage.setItem(STORAGE.rememberKey, remember ? "1" : "0");
+      localStorage.setItem(STORAGE.format, $("format").value);
+      localStorage.setItem(STORAGE.tone, $("tone").value);
+      localStorage.setItem(STORAGE.length, $("length").value);
+      if (remember) {
+        localStorage.setItem(STORAGE.apiKey, apiKey);
+      } else {
+        localStorage.removeItem(STORAGE.apiKey);
+      }
+    } catch (error) {
+      setStatus("Settings could not be saved in this browser.", "error");
+      showSaveSettingsFeedback("Save failed", "error");
+      return;
     }
-    setStatus("Settings saved.", "done");
+
+    const message = remember ? "Settings and API key saved." : "Settings saved. API key is not stored.";
+    setStatus(message, "done");
+    showSaveSettingsFeedback("Saved ✓", "done");
+  }
+
+  function showSaveSettingsFeedback(label, mode) {
+    const button = $("saveSettings");
+    window.clearTimeout(state.saveFeedbackTimer);
+    button.textContent = label;
+    button.classList.remove("done", "error");
+    button.classList.add(mode);
+    state.saveFeedbackTimer = window.setTimeout(function () {
+      button.textContent = "Save settings";
+      button.classList.remove("done", "error");
+    }, 2500);
   }
 
   function loadSettings() {
