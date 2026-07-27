@@ -7,7 +7,9 @@
     prompt: "cloudcix-guiden.prompt",
     format: "cloudcix-guiden.format",
     tone: "cloudcix-guiden.tone",
-    length: "cloudcix-guiden.length"
+    length: "cloudcix-guiden.length",
+    workflow: "cloudcix-guiden.workflow",
+    keepCitations: "cloudcix-guiden.keepCitations"
   };
 
   const GUIDEN_API_URL = "https://inference.cloudcix.com/v1/guiden/chat/completions";
@@ -25,6 +27,7 @@
     "ol",
     "li",
     "blockquote",
+    "a",
     "br",
     "table",
     "thead",
@@ -330,6 +333,14 @@
         parts.push("\n");
         return;
       }
+      if (node.tagName === "A") {
+        append(node.textContent);
+        const href = node.getAttribute("href") || "";
+        if (isSafeLink(href)) {
+          append("(" + href + ")");
+        }
+        return;
+      }
       if (node.tagName === "TH" || node.tagName === "TD") {
         append(node.textContent);
         parts.push("\t");
@@ -346,7 +357,7 @@
   }
 
   function hasRichStructure(html) {
-    return /<\s*(h1|h2|h3|ul|ol|li|table|blockquote)\b/i.test(html || "");
+    return /<\s*(h1|h2|h3|ul|ol|li|table|blockquote|a)\b/i.test(html || "");
   }
 
   async function pasteSelectionReplacement(suggestion) {
@@ -614,6 +625,44 @@
         await applySheetMatrix([[parsed.formula]], targetAddress, true);
       }
     },
+    classify_rows: {
+      key: "classify_rows",
+      label: "classifying rows in",
+      applyLabel: "Add category column",
+      detect(prompt) {
+        return /\b(classif(?:y|ication)|categori[sz]e|tag each row)\b/i.test(prompt || "");
+      },
+      buildMessages(prompt, snapshot) {
+        return [{
+          role: "system",
+          content: "You are CloudCIX Guiden® inside Euro-Office Spreadsheets. Classify each data row in the selected table and add one category column immediately to its right. Return JSON only with narrative, header, and values. values must be an array with exactly one plain-text category per data row, excluding the header row. Do not return formulas, Markdown, or code fences."
+        }, {
+          role: "user",
+          content: sheetCommonUserPrompt(prompt, snapshot, "classify rows")
+        }];
+      },
+      parseOutput(content) {
+        const parsed = parseSheetJson(content, "Guiden® expected category-column JSON.");
+        if (typeof parsed.header !== "string" || !parsed.header.trim() || !Array.isArray(parsed.values)) {
+          throw new Error("Guiden® must return a category header and one value per data row.");
+        }
+        return { narrative: typeof parsed.narrative === "string" ? parsed.narrative : "", header: parsed.header.trim(), values: parsed.values.map(function (value) { return value == null ? "" : String(value); }), table: [[parsed.header.trim()]].concat(parsed.values.map(function (value) { return [value == null ? "" : String(value)]; })) };
+      },
+      formatPreview(content) {
+        try { return renderSheetResult(this.parseOutput(content)); } catch (error) { return renderHtml(content || ""); }
+      },
+      async apply(suggestion, snapshot) {
+        const parsed = this.parseOutput(suggestion.content);
+        if (snapshot.sheet.rows < 2 || !snapshot.sheet.start) {
+          throw new Error("Select a table with a header row and at least one data row.");
+        }
+        if (parsed.values.length !== snapshot.sheet.rows - 1) {
+          throw new Error("Guiden® must return one category for every data row in the selection.");
+        }
+        const target = { startCol: snapshot.sheet.start.endCol + 1, startRow: snapshot.sheet.start.startRow };
+        await applySheetMatrix([[parsed.header]].concat(parsed.values.map(function (value) { return [value]; })), rangeAddressFromStart(target, snapshot.sheet.rows, 1));
+      }
+    },
     add_column: {
       key: "add_column",
       label: "adding a calculated column beside",
@@ -793,6 +842,7 @@
 
   function detectSheetOperation(prompt) {
     return [
+      sheetOperations.classify_rows,
       sheetOperations.add_column,
       sheetOperations.formula,
       sheetOperations.table,
@@ -976,7 +1026,7 @@
       ];
     },
     formatPreview(content) {
-      return renderHtml(content);
+      return formatStructuredOutput(content) || renderHtml(content);
     },
     async applySuggestion(suggestion) {
       if (suggestion.target === "full_document") {
@@ -1113,7 +1163,7 @@
         {
           role: "system",
           content:
-            "You are CloudCIX Guiden® inside Euro-Office Presentations. Preserve slide layout. Return concise slide-ready text only. Use a short title and clear bullet-style lines when useful. Do not include code fences or explanations."
+            "You are CloudCIX Guiden® inside Euro-Office Presentations. Preserve slide layout. Return concise slide-ready text only. Use a short title and clear bullet-style lines when useful. Do not include code fences or explanations. " + structuredOutputInstruction()
         },
         {
           role: "user",
@@ -1122,7 +1172,7 @@
       ];
     },
     formatPreview(content) {
-      return renderHtml(content);
+      return formatStructuredOutput(content) || renderHtml(content);
     },
     async applySuggestion(suggestion, snapshot) {
       const text = plainTextFromSuggestion(suggestion);
@@ -1150,10 +1200,12 @@
     $("generate").textContent = busy && label ? label : "Generate";
     $("stop").disabled = !busy;
     $("clear").disabled = busy;
-    $("saveSettings").disabled = busy;
+    document.getElementById("saveSettings").disabled = busy;
+    document.getElementById("workflow").disabled = busy;
+    document.getElementById("keepCitations").disabled = busy;
     $("apply").disabled = busy || !state.suggestion || state.suggestion.previewOnly;
     $("copy").disabled = busy || !state.suggestion;
-    document.querySelectorAll("#quickActions button").forEach((button) => {
+    document.querySelectorAll(".quick-actions button").forEach((button) => {
       button.disabled = busy;
     });
   }
@@ -1166,7 +1218,9 @@
       localStorage.setItem(STORAGE.rememberKey, remember ? "1" : "0");
       localStorage.setItem(STORAGE.format, $("format").value);
       localStorage.setItem(STORAGE.tone, $("tone").value);
-      localStorage.setItem(STORAGE.length, $("length").value);
+      localStorage.setItem(STORAGE.length, document.getElementById("length").value);
+      localStorage.setItem(STORAGE.workflow, document.getElementById("workflow").value);
+      localStorage.setItem(STORAGE.keepCitations, document.getElementById("keepCitations").checked ? "1" : "0");
       if (remember) {
         localStorage.setItem(STORAGE.apiKey, apiKey);
       } else {
@@ -1207,7 +1261,13 @@
       $("tone").value = localStorage.getItem(STORAGE.tone);
     }
     if (localStorage.getItem(STORAGE.length)) {
-      $("length").value = localStorage.getItem(STORAGE.length);
+      document.getElementById("length").value = localStorage.getItem(STORAGE.length);
+    }
+    if (localStorage.getItem(STORAGE.workflow)) {
+      document.getElementById("workflow").value = localStorage.getItem(STORAGE.workflow);
+    }
+    if (localStorage.getItem(STORAGE.keepCitations) !== null) {
+      document.getElementById("keepCitations").checked = localStorage.getItem(STORAGE.keepCitations) === "1";
     }
   }
 
@@ -1227,6 +1287,12 @@
     let output = "";
     let index = 0;
     while (index < text.length) {
+      const linkMatch = text.slice(index).match(/^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/i);
+      if (linkMatch) {
+        output += "<a href=\"" + escapeHtml(linkMatch[2]) + "\">" + escapeHtml(linkMatch[1]) + "</a>";
+        index += linkMatch[0].length;
+        continue;
+      }
       if (text.startsWith("**", index)) {
         const end = text.indexOf("**", index + 2);
         if (end !== -1) {
@@ -1335,7 +1401,7 @@
   }
 
   function looksLikeHtml(text) {
-    return /<\/?\s*(h1|h2|h3|p|strong|em|ul|ol|li|blockquote|br|table|thead|tbody|tr|th|td|b|i)\b/i.test(text || "");
+    return /<\/?\s*(h1|h2|h3|p|strong|em|ul|ol|li|blockquote|a|br|table|thead|tbody|tr|th|td|b|i)\b/i.test(text || "");
   }
 
   function cleanModelContent(text) {
@@ -1382,6 +1448,13 @@
       }
       if (tag === "br") {
         return "<br>";
+      }
+      if (tag === "a") {
+        const href = node.getAttribute("href") || "";
+        if (!/^https?:\/\//i.test(href)) {
+          return children;
+        }
+        return "<a href=\"" + escapeHtml(href) + "\">" + children + "</a>";
       }
       return styledTag(tag, children);
     }
@@ -1515,6 +1588,86 @@
     return htmlDocument(parts.join("\n"));
   }
 
+  function isSafeLink(url) {
+    return /^https?:\/\//i.test(String(url || "").trim());
+  }
+
+  function structuredList(values) {
+    if (!Array.isArray(values) || !values.length) {
+      return "";
+    }
+    return styledTag("ul", values.map(function (value) {
+      return styledTag("li", renderInlineMarkdown(String(value == null ? "" : value)));
+    }).join(""));
+  }
+
+  function structuredSources(sources) {
+    if (!keepCitations() || !Array.isArray(sources)) {
+      return "";
+    }
+    const items = sources.filter(function (source) {
+      return source && isSafeLink(source.url);
+    }).map(function (source) {
+      const title = String(source.title || source.url);
+      return styledTag("li", "<a href=\"" + escapeHtml(String(source.url)) + "\">" + renderInlineMarkdown(title) + "</a>");
+    });
+    return items.length ? styledTag("h3", "Sources") + styledTag("ul", items.join("")) : "";
+  }
+
+  function formatStructuredOutput(content) {
+    const workflow = selectedWorkflow();
+    if (workflow === "auto") {
+      return "";
+    }
+    const data = extractJsonObject(content);
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      return "";
+    }
+    const parts = [];
+    if (data.title) {
+      parts.push(styledTag("h1", renderInlineMarkdown(String(data.title))));
+    }
+    if (workflow === "minutes") {
+      [["Attendees", data.attendees], ["Decisions", data.decisions], ["Actions", data.actions], ["Next steps", data.next_steps]].forEach(function (section) {
+        const list = structuredList(section[1]);
+        if (list) {
+          parts.push(styledTag("h2", section[0]) + list);
+        }
+      });
+    } else if (workflow === "table") {
+      if (Array.isArray(data.columns) && Array.isArray(data.rows)) {
+        const headers = data.columns.map(function (cell) { return styledTag("th", renderInlineMarkdown(String(cell == null ? "" : cell))); }).join("");
+        const rows = data.rows.filter(Array.isArray).map(function (row) {
+          return "<tr>" + row.map(function (cell) { return styledTag("td", renderInlineMarkdown(String(cell == null ? "" : cell))); }).join("") + "</tr>";
+        }).join("");
+        parts.push(styledTag("table", "<thead><tr>" + headers + "</tr></thead><tbody>" + rows + "</tbody>"));
+      }
+    } else if (workflow === "slides" && Array.isArray(data.slides)) {
+      data.slides.forEach(function (slide, index) {
+        const heading = slide && slide.title ? String(slide.title) : "Slide " + String(index + 1);
+        parts.push(styledTag("h2", renderInlineMarkdown(heading)));
+        const list = structuredList(slide && slide.bullets);
+        if (list) {
+          parts.push(list);
+        }
+      });
+    }
+    parts.push(structuredSources(data.sources));
+    return parts.length ? htmlDocument(parts.join("")) : "";
+  }
+
+  function stripLinksForApply(html) {
+    if (keepCitations()) {
+      return html;
+    }
+    const template = document.createElement("template");
+    template.innerHTML = html || "";
+    template.content.querySelectorAll("a").forEach(function (link) {
+      link.replaceWith(document.createTextNode(link.textContent || ""));
+    });
+    return htmlDocument(template.innerHTML);
+  }
+
   function formatInstruction() {
     const format = $("format").value;
     const map = {
@@ -1528,14 +1681,42 @@
     return map[format] || map.auto;
   }
 
+  function selectedWorkflow() {
+    const control = document.getElementById("workflow");
+    return control ? control.value : "auto";
+  }
+
+  function keepCitations() {
+    const control = document.getElementById("keepCitations");
+    return !control || control.checked;
+  }
+
+  function structuredOutputInstruction() {
+    const workflow = selectedWorkflow();
+    const citationRule = keepCitations()
+      ? "When sources are available, include them only in a sources array with title and https URL. Never invent a source or URL."
+      : "Do not include a sources section or links.";
+    if (workflow === "minutes") {
+      return "Return JSON only with title, attendees, decisions, actions, next_steps, and sources. attendees, decisions, actions, next_steps, and sources are arrays. " + citationRule;
+    }
+    if (workflow === "table") {
+      return "Return JSON only with title, columns, rows, and sources. columns is an array, rows is a rectangular array, and sources is an array. " + citationRule;
+    }
+    if (workflow === "slides") {
+      return "Return JSON only with title, slides, and sources. slides is an array of objects with title and bullets arrays. " + citationRule;
+    }
+    return citationRule;
+  }
+
   function composeInstruction(prompt, target) {
     return [
       prompt,
       formatInstruction(),
-      $("tone").value,
-      $("length").value,
-      "Return valid HTML only. Use only these tags: h1, h2, h3, p, strong, em, ul, ol, li, blockquote, table, thead, tbody, tr, th, td, br.",
+      document.getElementById("tone").value,
+      document.getElementById("length").value,
+      "Return valid HTML only unless a structured workflow is selected. Use only these tags: h1, h2, h3, p, strong, em, a, ul, ol, li, blockquote, table, thead, tbody, tr, th, td, br.",
       "Use real paragraph tags for separate paragraphs. Use lists for lists. Use tables only when tabular information is clearly useful.",
+      structuredOutputInstruction(),
       target === "full_document"
         ? "You are editing the whole document. Return the complete revised document, not commentary."
         : "You are editing selected text. Return only the replacement text for that selection. Match the original structure and do not introduce new headings, tables, or document-level formatting unless the user explicitly asks for them."
@@ -1778,6 +1959,7 @@
     setStatus("Applying suggestion...", "loading");
     try {
       const adapter = state.adapter || writerAdapter;
+      state.suggestion.html = stripLinksForApply(state.suggestion.html);
       await adapter.applySuggestion(state.suggestion, state.snapshot);
       setStatus("Applied.", "done");
       discardSuggestion(false);
@@ -1848,7 +2030,9 @@
     hideRedundantPluginCloseButton();
     loadSettings();
     setBusy(false);
-    $("quickActions").addEventListener("click", useQuickAction);
+    document.querySelectorAll(".quick-actions").forEach(function (actions) {
+      actions.addEventListener("click", useQuickAction);
+    });
     $("generate").addEventListener("click", generate);
     $("stop").addEventListener("click", stop);
     $("clear").addEventListener("click", clearPrompt);
