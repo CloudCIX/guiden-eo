@@ -60,7 +60,7 @@ body {
   gap: 10px;
   margin: -12px -12px 0;
   border-bottom: 1px solid rgba(71, 178, 228, 0.34);
-  padding: 14px 12px 12px;
+  padding: 12px;
   color: #ffffff;
   background: linear-gradient(135deg, var(--brand-navy), var(--brand-blue));
 }
@@ -68,7 +68,7 @@ body {
 h1 {
   margin: 0;
   font-family: Jost, "Open Sans", Arial, Helvetica, sans-serif;
-  font-size: 21px;
+  font-size: 20px;
   font-weight: 700;
   line-height: 1.1;
   letter-spacing: 0;
@@ -181,7 +181,56 @@ p {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 7px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
+}
+
+.prompt-field {
+  margin-bottom: 10px;
+}
+
+.tool-drawer,
+.output-options {
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.tool-drawer summary,
+.output-options summary {
+  cursor: pointer;
+  color: var(--brand-blue);
+  font-weight: 700;
+  list-style: none;
+}
+
+.tool-drawer summary::-webkit-details-marker,
+.output-options summary::-webkit-details-marker {
+  display: none;
+}
+
+.tool-drawer summary::after,
+.output-options summary::after {
+  content: "+";
+  float: right;
+  color: var(--muted);
+}
+
+.tool-drawer[open] summary::after,
+.output-options[open] summary::after {
+  content: "−";
+}
+
+.tool-actions {
+  margin-top: 10px;
+  margin-bottom: 0;
+}
+
+.output-options .controls-grid {
+  margin-top: 10px;
+}
+
+.output-options .citation-control {
+  margin-bottom: 0;
 }
 
 .field {
