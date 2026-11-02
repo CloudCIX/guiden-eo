@@ -52,7 +52,7 @@ instead of copying it into a running container. The `Dockerfile` adds the plugin
 v9.3.7, pinned by digest.
 
 GitHub Actions (`.github/workflows/image.yml`) validates, tests and builds every pull request, and publishes
-`ghcr.io/cloudcix/guiden-eo` from `main` (tags `main` and `sha-<commit>`) and from version tags such as `v2.0.17`.
+`ghcr.io/cloudcix/guiden-eo` from `main` (tags `main` and `sha-<commit>`) and from version tags such as `v2.1.0`.
 Deploy by the digest in the job's summary, so a pod never picks up a different build.
 
 To build by hand:
@@ -68,12 +68,35 @@ change.
 
 1. Open a document, spreadsheet, or presentation in Euro-Office from Nextcloud.
 2. Open **Plugins > CloudCIX Guiden®**.
-3. Enter the CloudCIX API key.
+3. Enter the CloudCIX API key, unless the editor already provides one (see below).
 4. Select the text/cells/object you want to work with, or leave the current Writer document/current slide active for a broader suggestion.
 5. Choose an editor-specific action, then add an optional instruction.
 6. Click **Generate preview**, review the exact target and changes, then click **Apply changes**.
 
 The API key is not stored unless **Remember key on this browser** is checked.
+
+## Provide The Key From The Host
+
+The application that opens the editor can hand Guiden each person's key, so nobody types one in. Add it to the
+editor config, under `editorConfig.plugins.options`, keyed by the plugin's GUID, before the config is signed:
+
+```json
+"editorConfig": {
+  "plugins": {
+    "options": {
+      "asc.{7D4A7F73-2BB0-4C0F-82F9-0D0CDA18C621}": {
+        "guidenApiKey": "the person's CloudCIX API key",
+        "guidenUrl": "https://inference.cloudcix.com/v1/guiden/chat/completions",
+        "guidenModel": "Mistral-Medium-3.5"
+      }
+    }
+  }
+}
+```
+
+Only `guidenApiKey` is needed; `guidenUrl` (https only) and `guidenModel` override the defaults. When a key is
+provided, Settings hides the key field and the key is never saved in the browser. The key is visible to the person
+it belongs to, as it is when they type it, so give each person their own key and never a shared one.
 
 ## Notes
 
@@ -96,14 +119,29 @@ The API key is not stored unless **Remember key on this browser** is checked.
 - Company-knowledge questions are sent to retrieval without unrelated editor text. Answers fail closed when no relevant chunk is retrieved, and citations are copied only from exact HTTP(S) URLs returned by the retrieval service; model-authored links are discarded.
 - Company Knowledge uses verified server metadata when available. On legacy servers it enters a labelled compatibility mode, returns the Guiden answer, preserves only exact HTTP(S) URLs reported in the response without repairing them, and allows insertion after user review.
 - All editor actions keep document, sheet, and slide context in the system message while the final user message contains only the user instruction. This preserves the clean query used by Guiden retrieval.
+- A request is cancelled if Guiden sends nothing for 60 seconds, so a stalled service never leaves the panel waiting.
+- Very long documents (over 120,000 characters) or selections (over 5,000 cells) are cut for read-only questions, with a notice in the preview, and refused for changes, which would otherwise lose the part that was not sent.
+- Multi-cell results such as a calculated column or a new table are written in one editor command, so one Undo removes all of it.
+- The panel follows the editor's light or dark theme.
 - No Nextcloud config change is required.
 
 ## Tests
 
-The V2 validation and mocked-host suite has no package dependencies:
+The plugin has no dependencies. The unit and mocked-editor suite runs on Node alone:
 
 ```sh
 node plugin/cloudcix-guiden/tests/run.js
 ```
 
-Manual release QA is still required in Writer, Cells, and Slides because host API support varies between Euro-Office builds.
+The browser suite opens the real panel in Chromium against a fake Writer editor and a fake Guiden API, and checks what
+a person sees: previews, Apply, Copy, Company Knowledge, a provided key and the dark theme. It and the formatting check
+need the development tools in `package.json`:
+
+```sh
+npm ci && npx playwright install chromium
+npm test && npm run test:browser
+npm run format:check   # npm run format rewrites the files
+```
+
+GitHub Actions runs all three on every pull request. Manual release QA is still required in Writer, Cells, and Slides
+because host API support varies between Euro-Office builds.
