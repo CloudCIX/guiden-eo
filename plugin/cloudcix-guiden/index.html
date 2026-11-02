@@ -4,15 +4,15 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>CloudCIX Guiden®</title>
-    <link rel="stylesheet" href="styles/main.css?v=2.0.17" />
+    <link rel="stylesheet" href="styles/main.css?v=2.1.0" />
     <script src="../v1/plugins.js"></script>
-    <script defer src="scripts/core.js?v=2.0.17"></script>
-    <script defer src="scripts/host.js?v=2.0.17"></script>
-    <script defer src="scripts/api.js?v=2.0.17"></script>
-    <script defer src="scripts/writer.js?v=2.0.17"></script>
-    <script defer src="scripts/cells.js?v=2.0.17"></script>
-    <script defer src="scripts/slides.js?v=2.0.17"></script>
-    <script defer src="scripts/app.js?v=2.0.17"></script>
+    <script defer src="scripts/core.js?v=2.1.0"></script>
+    <script defer src="scripts/host.js?v=2.1.0"></script>
+    <script defer src="scripts/api.js?v=2.1.0"></script>
+    <script defer src="scripts/writer.js?v=2.1.0"></script>
+    <script defer src="scripts/cells.js?v=2.1.0"></script>
+    <script defer src="scripts/slides.js?v=2.1.0"></script>
+    <script defer src="scripts/app.js?v=2.1.0"></script>
   </head>
   <body>
     <main class="shell">
@@ -38,7 +38,7 @@
         <div class="actions"><button id="generate" class="primary" type="button">Ask Guiden</button><button id="stop" type="button" disabled>Stop</button><button id="clear" type="button">Clear</button></div>
       </section>
       <button id="undo" class="undo-button" type="button" hidden>Undo last Guiden action</button>
-      <section class="group settings"><details><summary>Settings</summary><label class="field"><span>CloudCIX API key</span><input id="apiKey" type="password" autocomplete="off" /></label><label class="remember"><input id="rememberKey" type="checkbox" /> Remember key on this browser</label><div class="settings-actions"><button id="saveSettings" type="button">Save settings</button><button id="testConnection" type="button">Test connection</button></div></details></section>
+      <section class="group settings"><details id="settings"><summary>Settings</summary><p id="managedKeyNote" class="managed-note" hidden>Your CloudCIX account provides the API key for this editor.</p><label class="field" id="apiKeyField"><span>CloudCIX API key</span><input id="apiKey" type="password" autocomplete="off" /></label><label class="remember" id="rememberKeyField"><input id="rememberKey" type="checkbox" /> Remember key on this browser</label><div class="settings-actions"><button id="saveSettings" type="button">Save settings</button><button id="testConnection" type="button">Test connection</button></div></details></section>
     </main>
   </body>
 </html>

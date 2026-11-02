@@ -167,6 +167,64 @@
   };
   core.wordCount = function (text) { const m = String(text || "").trim().match(/\S+/g); return m ? m.length : 0; };
   core.validateApplyResult = function (result) { if (!result || result.ok !== true) throw new Error(result && result.error || "Euro-Office rejected the change."); if (!Number.isInteger(result.changed) || result.changed < 1) throw new Error("Euro-Office reported that zero changes were applied."); if (typeof result.target !== "string" || !result.target) throw new Error("Euro-Office did not report the changed target."); return result; };
+  // Very long documents or selections would overflow the model's context. A read-only action gets the start of the
+  // text and a notice; an action that rewrites the content refuses, because rewriting half of it would lose the rest.
+  core.contextLimits = { chars: 120000, cells: 5000 };
+  core.fitContext = function (snapshot, mutates) {
+    const limits = core.contextLimits;
+    if (snapshot && snapshot.editor === "cell") {
+      const cells = (snapshot.rows || 0) * (snapshot.cols || 0);
+      if (cells <= limits.cells) return { snapshot, truncated: false };
+      if (mutates) throw new Error("The selection has " + cells + " cells, more than Guiden can change at once (" + limits.cells + "). Select a smaller range.");
+      const keep = Math.max(1, Math.floor(limits.cells / Math.max(1, snapshot.cols))), values = snapshot.values.slice(0, keep), formulas = snapshot.formulas.slice(0, keep);
+      return { snapshot: Object.assign({}, snapshot, { values, formulas, rows: values.length, text: values.map(r => r.join("\t")).join("\n") }), truncated: true, notice: "Guiden read only the first " + values.length + " of " + snapshot.rows + " rows of this selection." };
+    }
+    const text = String(snapshot && snapshot.text || "");
+    if (text.length <= limits.chars) return { snapshot, truncated: false };
+    if (mutates && snapshot.target !== "cursor") throw new Error("This " + (snapshot.target === "selection" ? "selection" : "document") + " is too long for Guiden to change in one go. Select a shorter section and try again.");
+    const kept = text.slice(0, limits.chars), percent = Math.round(100 * kept.length / text.length);
+    return { snapshot: Object.assign({}, snapshot, { text: kept + "\n\n[Truncated: the rest of the content was not sent.]", sourceHtml: "" }), truncated: true, notice: "This content is long, so Guiden read only the first " + percent + "% of it." };
+  };
+  // Settings the host hands the plugin through the editor config's plugins.options, which Euro-Office merges from
+  // options.all and options["<this plugin's guid>"] into Asc.plugin.info.options. Membership uses this to give each
+  // person their own key, so nobody has to type one in.
+  core.managedSettings = function (info) {
+    const options = info && info.options && typeof info.options === "object" ? info.options : {};
+    const key = typeof options.guidenApiKey === "string" ? options.guidenApiKey.trim() : "";
+    return { key, url: options.guidenUrl, model: options.guidenModel };
+  };
+  // Follow the editor's light or dark theme. Euro-Office sends a theme object whose type is "dark" or "light".
+  core.isDarkTheme = function (theme) {
+    if (!theme || typeof theme !== "object") return false;
+    if (typeof theme.type === "string") return theme.type.toLowerCase() === "dark";
+    const match = /^#?([0-9a-f]{6})$/i.exec(String(theme["background-normal"] || "").trim());
+    if (!match) return false;
+    const n = parseInt(match[1], 16), luminance = (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+    return luminance < 0.5;
+  };
+  // Plain text for the Copy button: what the preview shows, never the raw JSON reply.
+  core.htmlText = function (html) { return core.readableStreamText(String(html || "").replace(/<\/?(?:table|thead|tbody)[^>]*>/gi, "").replace(/<\/t[hd]>/gi, "\t")); };
+  core.previewText = function (preview, raw) {
+    const p = preview || {}, lines = [];
+    if (typeof p.answer === "string" && p.answer.trim() && p.kind !== "outline") lines.push(p.answer);
+    if (p.kind === "writer-new" || p.kind === "writer-diff") lines.push(core.htmlText(p.afterHtml));
+    if (p.kind === "text-diff") lines.push(p.after);
+    if (p.kind === "needs-input") lines.push(p.message);
+    if (p.kind === "formula") lines.push(p.formula);
+    if (p.kind === "notes") lines.push(p.notes);
+    if (p.kind === "new-slide") lines.push(p.title, ...p.bullets.map(b => "• " + b));
+    if (p.kind === "outline") { lines.push(p.answer); (p.slides || []).forEach((s, i) => { lines.push((i + 1) + ". " + (s.title || "Untitled")); (s.bullets || []).forEach(b => lines.push("• " + b)); }); }
+    if (p.kind === "new-column") lines.push([p.header].concat(p.values).join("\n"));
+    if (p.kind === "table" || (p.kind === "analysis" && Array.isArray(p.table) && p.table.length)) lines.push(p.table.map(row => (Array.isArray(row) ? row : [row]).join("\t")).join("\n"));
+    if (p.kind === "cell-updates") p.updates.forEach(u => lines.push(String(u.after)));
+    if (p.kind === "shape-updates") p.updates.forEach(u => lines.push(u.after));
+    const text = lines.filter(line => line != null && String(line).trim()).join("\n\n");
+    return text || String(raw || "");
+  };
+  core.sourcesHtml = function (sources) {
+    const safe = core.safeSources(sources);
+    return safe.length ? "<h3>Sources</h3><ul>" + safe.map(x => "<li><a href=\"" + core.escapeHtml(x.url) + "\">" + core.escapeHtml(x.title) + "</a></li>").join("") + "</ul>" : "";
+  };
   core.deepEqual = function (a, b) { return core.canonical(a) === core.canonical(b); };
 
   G.core = core;

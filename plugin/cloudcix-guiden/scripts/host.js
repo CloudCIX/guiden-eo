@@ -2,6 +2,8 @@
   "use strict";
   const G = global.Guiden, C = G.core;
   const host = {};
+  // Source for a styleCells(cells) function inside an editor command. It expects `sheet` to be the active sheet.
+  const STYLE_CELLS = 'function color(hex){return Api.CreateColorFromRGB(parseInt(hex.slice(1,3),16),parseInt(hex.slice(3,5),16),parseInt(hex.slice(5,7),16));}function styleCells(cells){let changed=0;for(let i=0;i<cells.length;i+=1){const item=cells[i],r=sheet&&sheet.GetRange(item.address),s=item.style;if(!r)return {ok:false,changed:changed,error:"A formatting target is unavailable."};let supported=false;if(s.fill&&r.SetFillColor){r.SetFillColor(color(s.fill));supported=true;}if(s.fontColor&&r.SetFontColor){r.SetFontColor(color(s.fontColor));supported=true;}if(typeof s.bold==="boolean"&&r.SetBold){r.SetBold(s.bold);supported=true;}if(typeof s.italic==="boolean"&&r.SetItalic){r.SetItalic(s.italic);supported=true;}if(s.align&&r.SetAlignHorizontal){r.SetAlignHorizontal(s.align);supported=true;}if(s.numberFormat&&r.SetNumberFormat){r.SetNumberFormat(s.numberFormat);supported=true;}if(!supported)return {ok:false,changed:changed,error:"Formatting is not supported by this Euro-Office build."};changed+=1;}return {ok:true,changed:changed};}';
   host.execute = function (name, args) { return new Promise((resolve, reject) => { try { global.Asc.plugin.executeMethod(name, args || [], resolve); } catch (e) { reject(e); } }); };
   host.command = function (fn) { return new Promise((resolve, reject) => { try { global.Asc.plugin.callCommand(fn, false, true, resolve); } catch (e) { reject(e); } }); };
   host.dynamicCommand = function (body, data) {
@@ -114,15 +116,23 @@
   };
   host.applyStyles = async function (cells, snapshot) {
     const payload = cells.map(item => ({ address: C.rangeAddress({ startRow: snapshot.start.startRow + item.row, startCol: snapshot.start.startCol + item.column }, 1, 1), style: item.style }));
-    const result = await host.dynamicCommand('const sheet=Api.GetActiveSheet();function color(hex){return Api.CreateColorFromRGB(parseInt(hex.slice(1,3),16),parseInt(hex.slice(3,5),16),parseInt(hex.slice(5,7),16));}let changed=0;for(let i=0;i<input.cells.length;i+=1){const item=input.cells[i],r=sheet&&sheet.GetRange(item.address),s=item.style;if(!r)return {ok:false,changed:changed,error:"A formatting target is unavailable."};let supported=false;if(s.fill&&r.SetFillColor){r.SetFillColor(color(s.fill));supported=true;}if(s.fontColor&&r.SetFontColor){r.SetFontColor(color(s.fontColor));supported=true;}if(typeof s.bold==="boolean"&&r.SetBold){r.SetBold(s.bold);supported=true;}if(typeof s.italic==="boolean"&&r.SetItalic){r.SetItalic(s.italic);supported=true;}if(s.align&&r.SetAlignHorizontal){r.SetAlignHorizontal(s.align);supported=true;}if(s.numberFormat&&r.SetNumberFormat){r.SetNumberFormat(s.numberFormat);supported=true;}if(!supported)return {ok:false,changed:changed,error:"Formatting is not supported by this Euro-Office build."};changed+=1;}return {ok:true,changed:changed};', { cells: payload });
+    const result = await host.dynamicCommand('const sheet=Api.GetActiveSheet();' + STYLE_CELLS + 'const styled=styleCells(input.cells);if(!styled.ok)return styled;return {ok:true,changed:styled.changed};', { cells: payload });
     if (!result || !result.ok || result.changed !== payload.length) throw new Error(result && result.error || "Only part of the formatting was applied.");
     return { ok: true, changed: result.changed, target: snapshot.address, warnings: [] };
   };
+  // Writes values (or formulas, when an item has formula) to single cells in one editor command, so a single Undo
+  // reverts the whole change.
+  host.applyCells = async function (cells, target) {
+    const result = await host.dynamicCommand('const sheet=Api.GetActiveSheet();let changed=0;for(let i=0;i<input.cells.length;i+=1){const item=input.cells[i],range=sheet&&sheet.GetRange(item.address);if(!range)return {ok:false,changed:changed,error:"A target cell cannot be edited."};let ok;if(typeof item.formula==="string"){if(typeof range.SetFormula==="function")ok=range.SetFormula(item.formula);else if(typeof range.SetValue==="function")ok=range.SetValue(item.formula);else return {ok:false,changed:changed,error:"Formulas are not supported."};}else{if(typeof range.SetValue!=="function")return {ok:false,changed:changed,error:"A target cell cannot be edited."};ok=range.SetValue(item.value);}if(ok===false)return {ok:false,changed:changed,error:"Euro-Office rejected a cell change."};changed+=1;}return {ok:true,changed:changed};', { cells });
+    if (!result || !result.ok || result.changed !== cells.length) throw new Error(result && result.error || "Only part of the change was applied.");
+    return { ok: true, changed: result.changed, target, warnings: [] };
+  };
   host.readRange = async function (address) { return host.dynamicCommand('const s=Api.GetActiveSheet(),r=s&&s.GetRange(input.address);if(!r)return {ok:false};return {ok:true,values:r.GetValue?r.GetValue():"",formulas:r.GetFormula?r.GetFormula():""};', { address }); };
   host.applyTable = async function (table, address, styles) {
-    const result = await host.dynamicCommand('const s=Api.GetActiveSheet(),r=s&&s.GetRange(input.address);if(!r||!r.SetValue)return {ok:false,error:"Table destination cannot be edited."};const ok=r.SetValue(input.table);if(ok===false)return {ok:false,error:"Euro-Office rejected the table."};return {ok:true,changed:input.table.length*input.table[0].length};', { table, address });
+    const start = C.parseA1Address(address), cells = (styles || []).map(item => ({ address: C.rangeAddress({ startRow: start.startRow + item.row, startCol: start.startCol + item.column }, 1, 1), style: item.style }));
+    // Values and header styling go in one command, so a single Undo removes the whole table.
+    const result = await host.dynamicCommand('const sheet=Api.GetActiveSheet(),r=sheet&&sheet.GetRange(input.address);if(!r||!r.SetValue)return {ok:false,error:"Table destination cannot be edited."};const ok=r.SetValue(input.table);if(ok===false)return {ok:false,error:"Euro-Office rejected the table."};' + STYLE_CELLS + 'const styled=styleCells(input.cells);if(!styled.ok)return {ok:false,error:styled.error};return {ok:true,changed:input.table.length*input.table[0].length};', { table, address, cells });
     if (!result || !result.ok) throw new Error(result && result.error || "The table was not applied.");
-    if (styles && styles.length) await host.applyStyles(styles, { start: C.parseA1Address(address), address });
     return { ok: true, changed: result.changed, target: address, warnings: [] };
   };
   host.applySelectedSlideText = async function (text, snapshot) { await host.execute("PasteText", [text]); return { ok: true, changed: 1, target: snapshot.targetLabel, warnings: [] }; };
