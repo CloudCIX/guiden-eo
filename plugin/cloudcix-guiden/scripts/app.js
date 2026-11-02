@@ -30,9 +30,12 @@
     queuedRun: null,
     // Position in the instruction history while Up and Down step through it; -1 is the text being typed.
     historyIndex: -1,
-    draftPrompt: ""
+    draftPrompt: "",
+    // The follow-up to send again when Try again is pressed; empty to run the prompt again.
+    retry: "",
+    // Whether any of Guiden's reply has arrived for the request in progress.
+    streamed: false
   };
-  const editorNames = { word: "Writer", cell: "Cells", slide: "Slides" };
   const defaultActions = { word: "writer.draft", cell: "cells.ask", slide: "slides.ask" };
   const ACTION_ORDER = {
     word: [
@@ -127,6 +130,33 @@
     clean(template.content);
     return template.innerHTML;
   }
+  // A detail Guiden was told not to make up, such as [City] or [Media contact]. It starts with a letter, so citation
+  // numbers like [12] are not placeholders.
+  const PLACEHOLDER = /\[[A-Za-zÀ-ÿ][^\]\n]{1,59}\]/g;
+  function placeholdersIn(text) {
+    return Array.from(new Set(String(text || "").match(PLACEHOLDER) || []));
+  }
+  function markPlaceholders(root) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT),
+      nodes = [];
+    while (walker.nextNode()) if (walker.currentNode.nodeValue.match(PLACEHOLDER)) nodes.push(walker.currentNode);
+    nodes.forEach(node => {
+      if (node.parentNode.closest && node.parentNode.closest("mark, textarea, input")) return;
+      const fragment = document.createDocumentFragment(),
+        text = node.nodeValue;
+      let last = 0;
+      text.replace(PLACEHOLDER, (match, offset) => {
+        if (offset > last) fragment.appendChild(document.createTextNode(text.slice(last, offset)));
+        const mark = document.createElement("mark");
+        mark.className = "placeholder";
+        mark.textContent = match;
+        fragment.appendChild(mark);
+        last = offset + match.length;
+      });
+      if (last < text.length) fragment.appendChild(document.createTextNode(text.slice(last)));
+      node.parentNode.replaceChild(fragment, node);
+    });
+  }
   function writerNativePayload(html) {
     const template = document.createElement("template");
     template.innerHTML = String(html || "");
@@ -135,8 +165,16 @@
     let linkCount = 0;
     function collect(node, style, output) {
       if (node.nodeType === 3) {
-        if (node.textContent)
-          output.push({ text: node.textContent, bold: Boolean(style.bold), italic: Boolean(style.italic) });
+        const text = node.textContent || "",
+          bold = Boolean(style.bold),
+          italic = Boolean(style.italic);
+        let last = 0;
+        text.replace(PLACEHOLDER, (match, offset) => {
+          if (offset > last) output.push({ text: text.slice(last, offset), bold, italic });
+          output.push({ text: match, bold, italic, highlight: true });
+          last = offset + match.length;
+        });
+        if (last < text.length) output.push({ text: text.slice(last), bold, italic });
         return;
       }
       if (node.nodeType !== 1) return;
@@ -333,6 +371,11 @@
         ? "Generate preview"
         : "Ask Guiden";
     $("stop").disabled = !value;
+    // Stop only matters while Guiden is working, and Clear only while it is not.
+    $("stop").hidden = !value;
+    $("clear").hidden = value;
+    if (value) $("retry").hidden = true;
+    renderQuick();
     if (!value && state.queuedRun) {
       const next = state.queuedRun;
       state.queuedRun = null;
@@ -414,19 +457,64 @@
   }
   ["word", "cell", "slide"].forEach(registerKnowledge);
 
+  // What Guiden will work on, in a few words: the panel is narrow, and the editor is obvious.
   function contextLabel(snapshot) {
-    if (!snapshot) return editorNames[state.editor] + " · Selection unavailable";
-    if (snapshot.editor === "word") return "Writer · " + snapshot.targetLabel + " · " + snapshot.words + " words";
-    if (snapshot.editor === "cell")
-      return (
-        "Cells · " + snapshot.sheetName + " · " + snapshot.address + " · " + snapshot.rows * snapshot.cols + " cells"
-      );
+    if (!snapshot) return "Selection unavailable";
+    if (snapshot.editor === "word") {
+      if (snapshot.target === "cursor") return "At the cursor";
+      const words = snapshot.words + (snapshot.words === 1 ? " word" : " words");
+      return (snapshot.target === "selection" ? "Selection" : "Whole document") + " · " + words;
+    }
+    if (snapshot.editor === "cell") {
+      const cells = snapshot.rows * snapshot.cols;
+      return snapshot.sheetName + " · " + snapshot.address + " · " + cells + (cells === 1 ? " cell" : " cells");
+    }
     return (
-      "Slides · Slide " +
+      "Slide " +
       (snapshot.slideIndex + 1) +
       " · " +
-      (snapshot.target === "selected_text" ? "Selected text" : snapshot.shapes.length + " text areas")
+      (snapshot.target === "selected_text" ? "selected text" : snapshot.shapes.length + " text areas")
     );
+  }
+  // The one-click actions for what is selected now. Rebuilt only when that changes, so a click is never lost.
+  function hasSelection(snapshot) {
+    return Boolean(snapshot && (snapshot.target === "selection" || snapshot.target === "selected_text"));
+  }
+  function renderQuick() {
+    const bar = $("quickBar");
+    if (!bar || !G.menus || !G.menus.quickActions) return;
+    const selected = hasSelection(state.context),
+      key = state.editor + ":" + selected;
+    if (bar.dataset.key !== key) {
+      bar.dataset.key = key;
+      bar.innerHTML = "";
+      G.menus.quickActions(state.editor, selected).forEach(item => {
+        if (item.choices) {
+          const select = document.createElement("select");
+          select.className = "quick-choice";
+          select.setAttribute("aria-label", item.text);
+          select.innerHTML =
+            '<option value="">' +
+            C.escapeHtml(item.text) +
+            " ▾</option>" +
+            item.choices
+              .map(c => '<option value="' + C.escapeHtml(c.id) + '">' + C.escapeHtml(c.text) + "</option>")
+              .join("");
+          bar.appendChild(select);
+        } else {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.dataset.command = item.id;
+          button.textContent = item.text;
+          bar.appendChild(button);
+        }
+      });
+    }
+    bar.querySelectorAll("button, select").forEach(el => (el.disabled = state.busy));
+  }
+  function runQuick(id) {
+    const command = G.menus && G.menus.commandFor(id);
+    if (command && command.actionId) handleRun(command);
   }
   async function refreshContext(quiet) {
     try {
@@ -434,9 +522,10 @@
       const snapshot = await G.host.readSnapshot(state.editor, actionId);
       state.context = snapshot;
       $("contextText").textContent = contextLabel(snapshot);
+      renderQuick();
       if (!quiet) setStatus("Selection refreshed.", "done");
     } catch (error) {
-      $("contextText").textContent = editorNames[state.editor] + " · Selection unavailable";
+      $("contextText").textContent = "Selection unavailable";
       if (!quiet) setStatus(error.message || "Unable to read the current selection.", "error");
     }
   }
@@ -488,8 +577,8 @@
     $("prompt").placeholder = action.placeholder || "Add an instruction.";
     $("promptLabel").textContent = action.mutates ? "Tell Guiden what to change" : "What would you like to know?";
     $("promptHint").textContent = action.mutates
-      ? "Guiden will show a preview and confirm the target before anything changes."
-      : "This action is read-only and will not change your file.";
+      ? "You'll see a preview before anything changes."
+      : "Read-only: your file won't change.";
     $("generate").textContent = action.mutates ? "Generate preview" : "Ask Guiden";
     $("outputOptions").hidden =
       action.id.startsWith("knowledge.") ||
@@ -581,6 +670,7 @@
     renderSources([]);
     preview.classList.add("streaming");
     preview.setAttribute("aria-busy", "true");
+    state.streamed = false;
     preview.innerHTML =
       "<div class=stream-lead><span></span>Guiden is writing…</div><div class=stream-output>Waiting for the first words…</div>";
     if (resultActions) resultActions.hidden = true;
@@ -596,6 +686,7 @@
       output = preview.querySelector(".stream-output"),
       readable = C.streamingText(content);
     if (!output) return;
+    if (content) state.streamed = true;
     output.textContent = readable || "Structuring the response…";
     preview.scrollTop = preview.scrollHeight;
   }
@@ -609,6 +700,12 @@
   function failStreaming(label) {
     const preview = $("preview"),
       lead = preview.querySelector(".stream-lead");
+    // Nothing arrived (a server error, or Stop before the first words): the status says what happened, and an
+    // empty "Failed" preview would only get in the way.
+    if (!state.streamed) {
+      $("resultGroup").hidden = true;
+      return;
+    }
     preview.classList.remove("streaming");
     preview.removeAttribute("aria-busy");
     $("previewBadge").textContent = label;
@@ -925,7 +1022,46 @@
       );
     if (preview.kind === "notes") parts.push('<div class="diff-label">Speaker notes</div>' + textHtml(preview.notes));
     $("preview").innerHTML = parts.join("");
+    markPlaceholders($("preview"));
     renderSources(preview.sources || [], preview.provenanceUnavailable);
+  }
+  // The Apply button says what it will do: "Replace selection", "Insert at cursor", "Add 3 comments".
+  function applyLabel(suggestion) {
+    const action = G.actions[suggestion.actionId],
+      snapshot = suggestion.snapshot || {},
+      preview = suggestion.preview || {};
+    const count = (n, one, many) => n + " " + (n === 1 ? one : many);
+    if (action.id === "writer.review") return "Add " + count((preview.comments || []).length, "comment", "comments");
+    if (action.id === "slides.notes") return "Add speaker notes";
+    if (action.id === "slides.new") return "Create slide";
+    if (action.editor === "word") {
+      if (snapshot.target === "cursor") return "Insert at cursor";
+      if ($("trackChanges").checked) return "Suggest changes";
+      return snapshot.target === "selection" ? "Replace selection" : "Replace document";
+    }
+    if (action.editor === "slide") return snapshot.target === "selected_text" ? "Replace text" : "Update slide";
+    if (preview.kind === "cell-updates" || preview.kind === "formatting") {
+      const n = (preview.updates || preview.cells || []).length;
+      return n ? (preview.kind === "formatting" ? "Format " : "Update ") + count(n, "cell", "cells") : "Apply";
+    }
+    if (preview.kind === "formula") return "Insert formula";
+    if (preview.kind === "table") return "Insert table";
+    if (preview.kind === "new-column") return "Fill column";
+    return "Apply";
+  }
+  // Plain words for the failures people actually hit, and whether trying again could help.
+  function friendlyError(error) {
+    const details = (error && error.guidenDetails) || {},
+      status = details.status;
+    if (details.timeout) return error.message;
+    if (details.phase === "fetch")
+      return "Guiden can't be reached. Check your internet connection, then try again. Nothing was changed.";
+    if (status === 429) return "Guiden is busy right now. Wait a moment, then try again. Nothing was changed.";
+    if (status >= 500)
+      return "Guiden is unavailable right now (HTTP " + status + "). Try again in a moment. Nothing was changed.";
+    if (details.phase === "stream")
+      return "Guiden's answer was cut off before it finished. Try again. Nothing was changed.";
+    return (error && error.message) || "Unable to generate a result.";
   }
   function appliedMessage(action, result) {
     if (action.editor === "cell")
@@ -994,6 +1130,7 @@
       setStatus("Add an instruction or question.", "error");
       return;
     }
+    state.retry = previous ? instruction : "";
     setBusy(true, action.mutates ? "Preparing preview…" : "Asking…");
     setStatus(action.mutates ? "Reading the current selection…" : "Reading context for your question…", "loading");
     state.controller = new AbortController();
@@ -1111,7 +1248,17 @@
       if (result.unverifiedLinks)
         preview.warning =
           (preview.warning ? preview.warning + " " : "") +
-          "This legacy Guiden response contains unverified links. Review their destinations before applying.";
+          "Check where the links go before applying: Guiden did not say which sources they came from.";
+      const placeholders =
+        typeof result.replacementHtml === "string" ? placeholdersIn(C.htmlText(result.replacementHtml)) : [];
+      state.suggestion.placeholders = placeholders;
+      if (placeholders.length)
+        preview.warning =
+          (preview.warning ? preview.warning + " " : "") +
+          (placeholders.length === 1 ? "1 placeholder" : placeholders.length + " placeholders") +
+          " to fill in, such as " +
+          placeholders[0] +
+          (state.editor === "word" ? ". They stay highlighted in the document." : ".");
       $("operationSummary").textContent = action.label + " · " + snapshot.targetLabel;
       $("previewBadge").textContent = result.needsInput
         ? "Needs information"
@@ -1127,14 +1274,7 @@
       $("apply").hidden = !applicable;
       $("trackOption").hidden = !(applicable && action.editor === "word" && action.id !== "writer.review");
       if (preview.kind === "comments" && !preview.comments.length) $("apply").hidden = true;
-      $("apply").textContent =
-        action.id === "slides.notes"
-          ? "Add notes"
-          : action.id === "slides.new"
-            ? "Create slide"
-            : action.id === "writer.review"
-              ? "Add comments"
-              : "Apply changes";
+      $("apply").textContent = applyLabel(state.suggestion);
       $("copy").hidden = Boolean(result.needsInput);
       $("insertKnowledge").hidden = !(
         action.canInsert &&
@@ -1147,8 +1287,8 @@
         result.needsInput
           ? "Guiden needs more information. Nothing can be applied yet."
           : action.mutates
-            ? "Preview ready. Review the target and changes before applying."
-            : "Answer ready. Nothing in your file has changed.",
+            ? "Preview ready. Nothing changes until you apply it."
+            : "Answer ready. Your file has not changed.",
         result.needsInput ? "attention" : "done"
       );
       if (!previous) localStorage.setItem(STORAGE.prompt, $("prompt").value);
@@ -1170,8 +1310,9 @@
           },
           reference
         );
-        setStatus((error.message || "Unable to generate a result.") + " Reference: " + reference, "error");
+        setStatus(friendlyError(error) + " Reference: " + reference, "error");
         const status = error.guidenDetails && error.guidenDetails.status;
+        $("retry").hidden = status === 401 || status === 403;
         if ((status === 401 || status === 403) && !state.managed) {
           state.pendingRun = { actionId: action.id, run: true, instruction: $("prompt").value.trim() };
           showConnect(true, "CloudCIX did not accept the saved API key. Paste a new one to carry on.");
@@ -1209,7 +1350,16 @@
         track: action.editor === "word" && $("trackChanges").checked
       });
       C.validateApplyResult(result);
-      setStatus(appliedMessage(action, result), "done");
+      const holders = (suggestion.placeholders || []).length;
+      setStatus(
+        appliedMessage(action, result) +
+          (holders && action.editor === "word"
+            ? holders === 1
+              ? " Fill in the highlighted placeholder."
+              : " Fill in the " + holders + " highlighted placeholders."
+            : ""),
+        "done"
+      );
       $("resultGroup").hidden = true;
       state.suggestion = null;
       const canUndo = await G.host.canUndo();
@@ -1360,6 +1510,21 @@
       if (b) selectAction(b.dataset.action);
     });
     $("generate").addEventListener("click", () => generate());
+    $("retry").addEventListener("click", () => {
+      $("retry").hidden = true;
+      generate(state.retry || undefined);
+    });
+    $("quickBar").addEventListener("click", e => {
+      const b = e.target.closest("button[data-command]");
+      if (b) runQuick(b.dataset.command);
+    });
+    $("quickBar").addEventListener("change", e => {
+      const select = e.target.closest("select");
+      if (!select || !select.value) return;
+      const id = select.value;
+      select.value = "";
+      runQuick(id);
+    });
     $("stop").addEventListener("click", () => state.controller && state.controller.abort());
     $("clear").addEventListener("click", () => {
       $("prompt").value = "";
@@ -1368,6 +1533,7 @@
     });
     $("apply").addEventListener("click", applySuggestion);
     $("trackChanges").addEventListener("change", () => {
+      if (state.suggestion) $("apply").textContent = applyLabel(state.suggestion);
       try {
         localStorage.setItem(STORAGE.track, $("trackChanges").checked ? "1" : "0");
       } catch (_) {}

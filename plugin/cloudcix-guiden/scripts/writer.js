@@ -81,7 +81,9 @@
     const html = data.replacementHtml || data.replacement_html;
     if (typeof html !== "string" || !html.trim())
       throw new Error("Guiden did not return validated replacement content. Nothing can be applied.");
-    return replacementResult(ensureBlocks(html), sources);
+    // A [placeholder] must stay plain text: Guiden once linked [Media contact] to an unrelated email address.
+    const unlinked = html.replace(/<a\b[^>]*>\s*(\[[^\]<]{1,60}\])\s*<\/a>/gi, "$1");
+    return replacementResult(ensureBlocks(unlinked), sources);
   }
 
   function optionsText(options) {

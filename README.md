@@ -76,14 +76,19 @@ Guiden starts with the editor. It adds:
   Notes and New slide in presentations);
 - a **Guiden** submenu on the right-click menu, with actions for what is under the cursor: the selected text, the
   cursor position in a document, the selected cells, or the current slide;
-- the Guiden panel, with a button in the right sidebar. Any action opens it.
+- the Guiden panel, with a button in the right sidebar. Any action opens it. Its top row has one-click actions for
+  what is selected right now: Improve, Fix, Shorter, Translate, Tone and Ask for selected text; Draft, Review
+  document, Ask and Company knowledge with nothing selected; Analyse, Explain formulas, Clean up and Formula in
+  spreadsheets; Shorten slide, Speaker notes, New slide and Ask on a slide.
 
 - **Change tone** (more formal, friendlier, more concise, simpler, more confident) for selected text in documents and
   presentations, **Review with comments** for a selection or a whole document, and **Explain formulas** for cells.
 
 Actions such as Improve, Fix and Translate start straight away. Actions that need an instruction (Rewrite, Ask, Draft
 here, Formula and so on) open the panel ready for it; press Ctrl+Enter (⌘+Enter on a Mac) to run and Esc to stop.
-Every change still stops at a preview, and nothing in the file changes until **Apply changes** is clicked.
+Every change still stops at a preview, and nothing in the file changes until the Apply button is clicked. The button
+says what it will do: **Replace selection**, **Insert at cursor**, **Suggest changes**, **Add 3 comments**, **Update 4
+cells** and so on.
 
 Working with a result:
 
@@ -98,6 +103,9 @@ Working with a result:
 - **Review with comments** adds Guiden's comments to the exact phrases they are about, in the editor's own Comments
   pane. Comments that do not quote the text exactly are left out.
 - Up and Down in the instruction box step through earlier instructions.
+- Details Guiden was not given, such as a dateline city or a spokesperson quote, come back as placeholders like
+  `[City]`. The preview marks them, and in documents they stay highlighted in yellow until they are filled in.
+- When Guiden cannot be reached, is busy or fails, the panel says so in plain words and offers **Try again**.
 
 The first time, the panel asks for a CloudCIX API key, checks it, remembers it in that browser (untick **Remember
 on this browser** to keep it for the session only), and then carries on with the action that was clicked. If CloudCIX

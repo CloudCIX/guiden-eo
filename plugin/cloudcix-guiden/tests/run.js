@@ -1176,6 +1176,32 @@ test("every toolbar and right-click command opens an action of its own editor", 
     ids.length = 0;
   });
 });
+test("every one-click action in the panel resolves to an action for its editor", () => {
+  const M = global.Guiden.menus;
+  [
+    ["word", true],
+    ["word", false],
+    ["cell", true],
+    ["slide", true],
+    ["slide", false]
+  ].forEach(([editor, selected]) => {
+    const items = M.quickActions(editor, selected);
+    assert(items.length >= 4 && items.length <= 6, editor + " has a short bar");
+    items.forEach(item =>
+      (item.choices || [item]).forEach(choice => {
+        const command = M.commandFor(choice.id);
+        assert(command, choice.id);
+        if (command.actionId.startsWith("knowledge.")) return; // registered by the panel (app.js)
+        assert(global.Guiden.actions[command.actionId], choice.id);
+        assert.strictEqual(global.Guiden.actions[command.actionId].editor, editor, choice.id);
+      })
+    );
+  });
+  assert.deepStrictEqual(
+    M.quickActions("slide", false).map(i => i.text),
+    ["Shorten slide", "Speaker notes", "New slide…", "Ask…"]
+  );
+});
 test("the right-click menu fits what was clicked", () => {
   const labels = (editor, type) => {
     const menu = M.contextMenu(editor, type);
@@ -1200,7 +1226,7 @@ test("the right-click menu fits what was clicked", () => {
     actionId: "writer.rewrite",
     run: true,
     instruction:
-      "Rewrite it in a more formal, professional register: replace casual words, phrases and contractions with formal ones. Keep the meaning, names and numbers, and keep every claim exactly as strong as it is: do not turn 'good' into 'significant' or 'a lot' into 'substantial'."
+      "Rewrite it in a more formal, professional register: replace casual words, phrases and contractions with formal ones. Keep the meaning, names and numbers."
   });
   assert.strictEqual(M.commandFor("word.review").actionId, "writer.review");
   assert.strictEqual(M.commandFor("cell.explain").actionId, "cells.ask");

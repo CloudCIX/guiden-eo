@@ -1358,3 +1358,204 @@ html.theme-dark .preview ins {
     padding: 8px 10px;
   }
 }
+
+/* 2.4: a slimmer panel with one-click actions. The editor's side panel is often only about 220px wide, so every
+   line counts. */
+[hidden] {
+  display: none !important;
+}
+.topbar {
+  align-items: center;
+  padding: 7px 12px;
+}
+.topbar h1 {
+  font-size: 15px;
+  white-space: nowrap;
+}
+.topbar .eyebrow {
+  display: inline;
+  margin: 0 2px 0 0;
+  font-size: 11px;
+}
+.context-bar {
+  min-height: 32px;
+  padding: 5px 6px 5px 10px;
+}
+.context-bar #contextText {
+  white-space: normal;
+}
+.quick-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.quick-bar:empty {
+  display: none;
+}
+.quick-bar button,
+.quick-choice {
+  min-height: 28px;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 10px;
+  color: var(--brand-navy);
+  background: var(--surface);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.quick-choice {
+  appearance: none;
+  -webkit-appearance: none;
+}
+.quick-choice:hover:not(:disabled),
+.quick-choice:focus-visible {
+  border-color: var(--brand-cyan);
+  outline: none;
+}
+.quick-choice:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+html.theme-dark .quick-bar button,
+html.theme-dark .quick-choice {
+  color: var(--ink);
+  background: var(--surface);
+}
+.status-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.status-line .status {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+.status-line:not(:has(.status:not(:empty))):not(:has(.retry-button:not([hidden]))) {
+  display: none;
+}
+.retry-button {
+  min-height: 28px;
+  padding: 3px 12px;
+  font-size: 12px;
+}
+.link-button {
+  border: 0 !important;
+  padding: 6px 4px !important;
+  color: var(--brand-blue) !important;
+  background: transparent !important;
+}
+html.theme-dark .link-button {
+  color: var(--brand-cyan) !important;
+}
+.actions,
+.connect-card .actions {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+@media (max-width: 360px) {
+  .actions {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}
+.action-picker {
+  margin-bottom: 10px;
+}
+.action-picker > summary {
+  padding: 8px 10px;
+}
+.action-current small,
+.action-picker-panel .section-title {
+  display: none;
+}
+.action-picker-panel {
+  padding: 6px;
+}
+.action-picker .action-grid {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+}
+.action-picker .action-card {
+  min-height: 0;
+  padding: 6px 9px !important;
+}
+.action-picker .action-card small {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+mark.placeholder {
+  border-radius: 3px;
+  padding: 0 2px;
+  color: inherit;
+  background: #fde68a;
+}
+html.theme-dark mark.placeholder {
+  color: #fde68a;
+  background: #78350f;
+}
+.quick-choice {
+  width: auto;
+}
+textarea {
+  min-height: 72px;
+}
+/* Clear sits beside the instruction's label, so the Generate button keeps the whole row. */
+.instruction-block {
+  position: relative;
+}
+.instruction-block > label {
+  padding-right: 44px;
+}
+.clear-prompt {
+  position: absolute;
+  top: -6px;
+  right: -4px;
+  min-height: 28px;
+  font-size: 12px;
+}
+.actions {
+  grid-template-columns: minmax(0, 1fr);
+}
+.actions:has(#stop:not([hidden])) {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+@media (max-width: 360px) {
+  .actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .actions:has(#stop:not([hidden])) {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}
+/* Messages are read at a glance in a narrow panel: smaller type, less padding. */
+.status {
+  min-height: 0;
+  padding: 6px 9px;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.warning {
+  padding: 6px 9px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+/* Apply gets the whole first row; Copy and Discard share the second. */
+.result-actions,
+.result-actions:has(#insertKnowledge:not([hidden])) {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+.result-actions > #apply,
+.result-actions > #insertKnowledge {
+  grid-column: 1 / -1;
+}
+@media (max-width: 360px) {
+  .result-actions {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}

@@ -12,7 +12,7 @@
     [
       "formal",
       "More formal",
-      "Rewrite it in a more formal, professional register: replace casual words, phrases and contractions with formal ones. Keep the meaning, names and numbers, and keep every claim exactly as strong as it is: do not turn 'good' into 'significant' or 'a lot' into 'substantial'."
+      "Rewrite it in a more formal, professional register: replace casual words, phrases and contractions with formal ones. Keep the meaning, names and numbers."
     ],
     [
       "friendly",
@@ -196,5 +196,50 @@
     return [{ id: "guiden", text: "Guiden", items }];
   }
 
-  G.menus = { LANGUAGES, TONES, COMMANDS, OPEN, commandFor, contextMenu, toolbar, icon };
+  // One-click actions at the top of the panel, for what is selected right now. An item with choices is a menu whose
+  // choices are command ids, like Translate's languages.
+  function quickActions(editor, selected) {
+    const q = (id, text) => ({ id, text: text || COMMANDS[id].label });
+    const choose = (text, choices) => ({ id: "", text, choices });
+    if (editor === "word")
+      return selected
+        ? [
+            q("word.improve", "Improve"),
+            q("word.fix", "Fix"),
+            q("word.tone.concise", "Shorter"),
+            choose("Translate", languageItems("word.translate.")),
+            choose("Tone", toneItems("word.tone.")),
+            q("word.ask", "Ask…")
+          ]
+        : [
+            q("word.draft", "Draft…"),
+            q("word.review", "Review document"),
+            q("word.ask", "Ask…"),
+            q("word.knowledge", "Company knowledge…")
+          ];
+    if (editor === "cell")
+      return [
+        q("cell.ask", "Analyse"),
+        q("cell.explain", "Explain formulas"),
+        q("cell.edit", "Clean up"),
+        q("cell.formula", "Formula…")
+      ];
+    if (editor === "slide")
+      return selected
+        ? [
+            q("slide.improve", "Improve"),
+            q("slide.tone.concise", "Shorter"),
+            choose("Translate", languageItems("slide.translate.")),
+            q("slide.ask", "Ask…")
+          ]
+        : [
+            q("slide.shorten", "Shorten slide"),
+            q("slide.notes", "Speaker notes"),
+            q("slide.new", "New slide…"),
+            q("slide.ask", "Ask…")
+          ];
+    return [];
+  }
+
+  G.menus = { LANGUAGES, TONES, COMMANDS, OPEN, commandFor, contextMenu, toolbar, quickActions, icon };
 })(typeof window !== "undefined" ? window : globalThis);

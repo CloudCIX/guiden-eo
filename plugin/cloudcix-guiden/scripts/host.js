@@ -476,6 +476,8 @@
                 if (parts[k]) run.AddText(parts[k]);
                 if (segment.bold && typeof run.SetBold === "function") run.SetBold(true);
                 if (segment.italic && typeof run.SetItalic === "function") run.SetItalic(true);
+                // A [placeholder] Guiden could not fill in is highlighted, so it is easy to find and replace.
+                if (segment.highlight && parts[k] && typeof run.SetHighlight === "function") run.SetHighlight("yellow");
                 if (k < parts.length - 1 && typeof run.AddLineBreak === "function") run.AddLineBreak();
                 if (para.Push(run) === false) return { ok: false, error: "Writer text could not be inserted." };
               }
