@@ -245,6 +245,23 @@
       })
       .catch(() => "word");
   };
+  const documentText = function () {
+    const doc = Api.GetDocument(),
+      options = {
+        Numbering: true,
+        Math: true,
+        TableCellSeparator: "\t",
+        TableRowSeparator: "\n",
+        ParaSeparator: "\n\n",
+        NewLineSeparator: "\n"
+      };
+    if (doc && typeof doc.GetText === "function") return doc.GetText(options) || "";
+    const out = [],
+      paragraphs = doc && doc.GetAllParagraphs ? doc.GetAllParagraphs() : [];
+    for (let i = 0; i < paragraphs.length; i += 1)
+      if (paragraphs[i] && paragraphs[i].GetText) out.push(paragraphs[i].GetText(options) || "");
+    return out.join("\n\n");
+  };
   host.readWriter = async function (actionId) {
     let selected = await host.execute("GetSelectedText", [{}]).catch(() => "");
     selected = selected || "";
@@ -252,26 +269,13 @@
     const insertsAtCursor = actionId === "writer.draft";
     let target = selected.trim() ? "selection" : insertsAtCursor ? "cursor" : "full_document",
       text = selected;
-    if (target === "full_document")
-      text = await host
-        .command(function () {
-          const doc = Api.GetDocument(),
-            options = {
-              Numbering: true,
-              Math: true,
-              TableCellSeparator: "\t",
-              TableRowSeparator: "\n",
-              ParaSeparator: "\n\n",
-              NewLineSeparator: "\n"
-            };
-          if (doc && typeof doc.GetText === "function") return doc.GetText(options) || "";
-          const out = [],
-            paragraphs = doc && doc.GetAllParagraphs ? doc.GetAllParagraphs() : [];
-          for (let i = 0; i < paragraphs.length; i += 1)
-            if (paragraphs[i] && paragraphs[i].GetText) out.push(paragraphs[i].GetText(options) || "");
-          return out.join("\n\n");
-        })
-        .catch(() => "");
+    if (target === "full_document") text = await host.command(documentText).catch(() => "");
+    // A draft at the cursor reads the document too, so new content fits its subject and wording. It is context only:
+    // it is not part of the fingerprint, so typing elsewhere in the document does not block adding the draft.
+    const context =
+      target === "cursor"
+        ? String((await host.command(documentText).catch(() => "")) || "").slice(0, C.contextLimits.draftContextChars)
+        : "";
     const source = { target, text: text || "", html: selectedHtml || "" };
     return {
       editor: "word",
@@ -279,6 +283,7 @@
       target,
       targetLabel: target === "selection" ? "Selected text" : target === "cursor" ? "Current cursor" : "Whole document",
       text: source.text,
+      contextText: context.trim() ? context : "",
       sourceHtml: source.html,
       words: C.wordCount(source.text),
       fingerprint: C.fingerprint(source)

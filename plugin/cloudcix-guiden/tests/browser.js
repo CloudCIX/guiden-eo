@@ -306,9 +306,12 @@ test("a key, endpoint model and theme from the editor are used, and the key box 
 
 test("a streamed draft previews as prose, copies as text and applies at the cursor", async () => {
   const json = JSON.stringify({ status: "ready", replacementHtml: "<h2>Plan</h2><p>Step <strong>one</strong>.</p>" });
-  const t = await open(typedKey, sse([delta(json.slice(0, 20)), delta(json.slice(20))]));
+  const setup = Object.assign({}, typedKey, { documentText: "Release notes for our software platform." });
+  const t = await open(setup, sse([delta(json.slice(0, 20)), delta(json.slice(20))]));
   try {
     await generate(t.page, "Draft a plan");
+    // The rest of the document goes along as context, so the draft fits what the document is about.
+    assert.match(t.requests[0].body.messages[0].content, /for context only[^]*Release notes for our software platform/);
     assert.strictEqual(await t.page.$$eval("#preview article.response-flow", els => els.length), 1);
     assert.strictEqual(await hidden(t.page, "#apply"), false);
     assert.strictEqual(await text(t.page, "#previewBadge"), "Will change file");

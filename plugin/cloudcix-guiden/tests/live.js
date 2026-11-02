@@ -4,8 +4,9 @@
 //
 //   GUIDEN_API_KEY=... node plugin/cloudcix-guiden/tests/live.js [report.json]
 //
-// GUIDEN_URL and GUIDEN_MODEL override the endpoint and model. GUIDEN_TEST=<words> runs only the matching cases. The
-// report holds each request's messages, the raw reply and every check, and never the key.
+// GUIDEN_URL and GUIDEN_MODEL override the endpoint and model. GUIDEN_TEST=<words> runs only the matching cases.
+// GUIDEN_RUNS=<n> runs every case n times, because Guiden's replies vary from one request to the next. The report
+// holds each request's messages, the raw reply, whether Guiden used retrieval, and every check, and never the key.
 const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
@@ -34,13 +35,14 @@ const OPTIONS = {
 };
 
 // Snapshots shaped like the ones host.js reads from the editor.
-function writer(actionId, text, target) {
+function writer(actionId, text, target, contextText) {
   return {
     editor: "word",
     actionId,
     target,
     targetLabel: target === "selection" ? "Selected text" : target === "cursor" ? "Current cursor" : "Whole document",
     text,
+    contextText: contextText || "",
     sourceHtml: "",
     options: OPTIONS
   };
@@ -82,6 +84,8 @@ function slide(actionId, shapes, selected) {
 function blocks(html) {
   return (String(html || "").match(/<(p|h[1-6]|li|blockquote)\b/gi) || []).length;
 }
+// -ize spellings such as "prioritize"; Guiden is asked for Irish English, which spells them "prioritise".
+const AMERICAN = /\b\w{3,}iz(?:e|es|ed|ing|ation)\b/i;
 function words(text) {
   return String(text || "")
     .replace(/<[^>]+>/g, " ")
@@ -147,6 +151,8 @@ const cases = [
     check(result) {
       assert(!result.needsInput, "asked for input: " + result.message);
       assert(blocks(result.replacementHtml) >= 1, "empty");
+      // "a lot of" and "happy" are casual; a more formal rewrite replaces them rather than only fixing the grammar.
+      assert(!/\ba ?lot of\b|\bhappy\b/i.test(result.replacementHtml), "still casual: " + result.replacementHtml);
       return { html: result.replacementHtml };
     }
   },
@@ -169,7 +175,7 @@ const cases = [
     check(result) {
       assert(!result.needsInput, "asked for input: " + result.message);
       assert(result.comments.length >= 2, "fewer than 2 comments for a text with obvious mistakes");
-      const irish = result.comments.filter(c => /team have/.test(c.quote) && /\bhas\b/.test(c.comment));
+      const irish = result.comments.filter(c => /team have/.test(c.quote) && /\bhas\b|singular/.test(c.comment));
       assert(!irish.length, "flagged Irish English 'team have': " + JSON.stringify(irish));
       const passive = result.comments.filter(c => /passive/i.test(c.comment) && !/was done/.test(c.quote));
       assert(!passive.length, "called active text passive: " + JSON.stringify(passive));
@@ -187,15 +193,24 @@ const cases = [
     }
   },
   {
-    name: "Writer Draft here writes headings and paragraphs",
+    name: "Writer Draft here writes headings and paragraphs that fit the document",
     actionId: "writer.draft",
-    snapshot: writer("writer.draft", "", "cursor"),
+    // The document around the cursor is about a software service, so "shipping the platform" means releasing it.
+    snapshot: writer(
+      "writer.draft",
+      "",
+      "cursor",
+      "Quarterly update\n\n" +
+        CLEAN.join("\n\n") +
+        "\n\nThe platform is the new version of our hosted software service."
+    ),
     instruction:
       "Write a short 'Next steps' section with a heading and three bullet points about shipping the platform.",
     check(result) {
       assert(!result.needsInput, "asked for input: " + result.message);
       assert(/<h[1-3]\b/i.test(result.replacementHtml), "no heading");
       assert(/<li\b/i.test(result.replacementHtml), "no list");
+      assert(!/logistic|freight|carrier|warehouse|shipment/i.test(result.replacementHtml), "read as physical shipping");
       return { html: result.replacementHtml };
     }
   },
@@ -216,6 +231,8 @@ const cases = [
       assert(!/mailto:|[\w.+-]+@[\w-]+\.[a-z]{2,}/i.test(result.replacementHtml), "made up an email contact");
       assert(!/\+\d{2,3}[\s\d()-]{6,}|\b0\d{1,2}[\s-]?\d{3}[\s-]?\d{4}\b/.test(text), "made up a phone number");
       assert(!/[“"][^”"]{15,}[”"],?\s+(?:said|says|added)\b/i.test(text), "made up a quote");
+      assert(!/\b(?:Dublin|Cork|Galway|Limerick)\b/.test(text), "made up a dateline city");
+      assert(!/credentials|log ?in with|sign ?in with/i.test(text), "made up how people sign in");
       return { words: words(result.replacementHtml), placeholders: text.match(/\[[^\]]{3,60}\]/g) || [] };
     }
   },
@@ -261,6 +278,7 @@ const cases = [
     instruction: G.menus.commandFor("cell.explain").instruction,
     check(result) {
       assert(/VAT|tax|23|B2/i.test(result.answer), "did not explain the formula: " + result.answer);
+      assert(/1\.23/.test(result.answer) && /\b123\b/.test(result.answer), "did not work it through: " + result.answer);
       return { answer: result.answer };
     }
   },
@@ -277,6 +295,7 @@ const cases = [
       assert(!/reliablity/.test(result.replacementText), "left the typo");
       assert(/\bwill\b|['’]ll\b/i.test(result.replacementText), "changed the tense: " + result.replacementText);
       assert(/cost/i.test(result.replacementText), "dropped the costs point: " + result.replacementText);
+      assert(!AMERICAN.test(result.replacementText), "American spelling: " + result.replacementText);
       return { text: result.replacementText };
     }
   },
@@ -290,6 +309,7 @@ const cases = [
       assert(/reliab/i.test(notes) && /cost/i.test(notes) && /platform/i.test(notes), "missed a point: " + notes);
       assert(words(notes) >= 20 && words(notes) <= 250, "odd length: " + words(notes) + " words");
       assert(!/\d+\s?%|€\s?\d/.test(notes), "made up a figure: " + notes);
+      assert(!AMERICAN.test(notes), "American spelling: " + notes);
       return { words: words(notes), notes };
     }
   }
@@ -308,47 +328,78 @@ async function ask(action, snapshot, messages) {
     raw = await G.api.complete(key, C.schemaRetryMessages(messages), new AbortController().signal);
     result = action.parseResponse(raw, snapshot);
   }
-  return { result, raw, retried, ms: Date.now() - started, metadata: G.api.lastMetadata };
+  const metadata = G.api.lastMetadata || {};
+  return {
+    result,
+    raw,
+    retried,
+    ms: Date.now() - started,
+    retrieval: { used: Boolean(metadata.retrievalUsed), sources: metadata.sources || [] }
+  };
+}
+
+function label(item, run, runs) {
+  return runs > 1 ? item.name + " [run " + run + "]" : item.name;
 }
 
 (async () => {
-  const only = process.env.GUIDEN_TEST || "";
-  const report = { when: new Date().toISOString(), url: G.api.url, model: G.api.model, cases: [] };
+  const only = process.env.GUIDEN_TEST || "",
+    runs = Math.max(1, parseInt(process.env.GUIDEN_RUNS || "1", 10) || 1);
+  const report = { when: new Date().toISOString(), url: G.api.url, model: G.api.model, runs, cases: [] };
   let failed = 0;
-  for (const item of cases.filter(c => c.name.includes(only))) {
-    const action = G.actions[item.actionId],
-      entry = { name: item.name, actionId: item.actionId, steps: [] };
-    report.cases.push(entry);
-    try {
-      const messages = action.buildRequest(item.snapshot, item.instruction || "", OPTIONS);
-      const first = await ask(action, item.snapshot, messages);
-      entry.steps.push({ messages, raw: first.raw, retried: first.retried, ms: first.ms });
-      entry.notes = item.check(first.result);
-      if (item.followUp && item.checkFollowUp) {
-        const conversation = messages.concat([
-          { role: "assistant", content: first.raw },
-          { role: "user", content: item.followUp }
-        ]);
-        const second = await ask(action, item.snapshot, conversation);
-        entry.steps.push({ followUp: item.followUp, raw: second.raw, retried: second.retried, ms: second.ms });
-        entry.followUpNotes = item.checkFollowUp(second.result, first.result);
+  const selected = cases.filter(c => c.name.includes(only));
+  for (let run = 1; run <= runs; run += 1)
+    for (const item of selected) {
+      const action = G.actions[item.actionId],
+        entry = { name: item.name, run, actionId: item.actionId, steps: [] };
+      report.cases.push(entry);
+      try {
+        // An empty prompt sends the action's default instruction, as the panel does.
+        const messages = action.buildRequest(item.snapshot, item.instruction || action.defaultInstruction, OPTIONS);
+        const first = await ask(action, item.snapshot, messages);
+        entry.steps.push({
+          messages,
+          raw: first.raw,
+          retried: first.retried,
+          ms: first.ms,
+          retrieval: first.retrieval
+        });
+        entry.notes = item.check(first.result);
+        if (item.followUp && item.checkFollowUp) {
+          const conversation = messages.concat([
+            { role: "assistant", content: first.raw },
+            { role: "user", content: item.followUp }
+          ]);
+          const second = await ask(action, item.snapshot, conversation);
+          entry.steps.push({
+            followUp: item.followUp,
+            raw: second.raw,
+            retried: second.retried,
+            ms: second.ms,
+            retrieval: second.retrieval
+          });
+          entry.followUpNotes = item.checkFollowUp(second.result, first.result);
+        }
+        entry.ok = true;
+        process.stdout.write(
+          "✓ " + label(item, run, runs) + " (" + entry.steps.map(s => s.ms + " ms").join(", ") + ")\n"
+        );
+      } catch (error) {
+        failed += 1;
+        entry.ok = false;
+        entry.error = error.message;
+        process.stdout.write("✗ " + label(item, run, runs) + "\n  " + error.message.slice(0, 400) + "\n");
       }
-      entry.ok = true;
-      process.stdout.write("✓ " + item.name + " (" + entry.steps.map(s => s.ms + " ms").join(", ") + ")\n");
-    } catch (error) {
-      failed += 1;
-      entry.ok = false;
-      entry.error = error.message;
-      process.stdout.write("✗ " + item.name + "\n  " + error.message.slice(0, 400) + "\n");
     }
-  }
   fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
   process.stdout.write(
     "\n" +
       (report.cases.length - failed) +
       " of " +
       report.cases.length +
-      " live cases passed. Report: " +
+      " live cases passed" +
+      (runs > 1 ? " over " + runs + " runs" : "") +
+      ". Report: " +
       reportPath +
       "\n"
   );

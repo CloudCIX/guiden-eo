@@ -3,8 +3,7 @@
   const G = global.Guiden,
     C = G.core;
   const jsonOnly = "Return JSON only. Do not use Markdown or code fences.";
-  const keep =
-    "Keep the meaning, facts, numbers, and tense: a plan that says 'we will' still says what will happen. Keep the variety of English the slide uses. ";
+  const keep = "Keep the meaning, facts, numbers, and tense: a plan that says 'we will' still says what will happen. ";
   function source(snapshot, options) {
     return (
       "Target: " +
@@ -199,7 +198,7 @@
       return request(
         "Create speaker notes for the current slide: what the presenter should say about each point, in plain sentences they can read aloud. " +
           "No Markdown, HTML, or headings. Follow the requested length. " +
-          "Do not add facts, figures, or claims that are not on the slide or in supplied retrieval context. " +
+          "Expand on the slide's own points; do not add facts, figures, promises, or claims that are not on the slide or in supplied retrieval context. " +
           'Return {"notes":"plain text notes"}. ' +
           jsonOnly,
         snapshot,

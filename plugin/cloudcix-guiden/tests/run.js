@@ -399,9 +399,21 @@ test("plain-text replacements become one paragraph per line, so paragraph breaks
     length: "auto",
     structure: "auto"
   })[0].content;
-  assert.match(system, /Irish and British/);
+  assert.match(system, /Irish English/);
   assert.match(system, /placeholder in square brackets/);
   assert.match(system, /tense/);
+});
+test("a draft at the cursor sees the rest of the document as context, and other actions do not", () => {
+  const options = { tone: "auto", length: "auto", structure: "auto" },
+    snapshot = { target: "cursor", targetLabel: "Current cursor", text: "", contextText: "Our new software platform." },
+    draft = global.Guiden.actions["writer.draft"].buildRequest(snapshot, "Write next steps.", options)[0].content,
+    improve = global.Guiden.actions["writer.improve"].buildRequest(
+      Object.assign({}, snapshot, { target: "selection", text: "x" }),
+      "",
+      options
+    )[0].content;
+  assert.match(draft, /rest of the document, for context only[^]*Our new software platform\./);
+  assert.doesNotMatch(improve, /Our new software platform/);
 });
 test("Ordinary document prose is not mistaken for an assistant refusal", () => {
   const result = global.Guiden.actions["writer.draft"].parseResponse(
@@ -1187,7 +1199,8 @@ test("the right-click menu fits what was clicked", () => {
   assert.deepStrictEqual(M.commandFor("word.tone.formal"), {
     actionId: "writer.rewrite",
     run: true,
-    instruction: "Make it more formal and professional. Keep the meaning, names and numbers."
+    instruction:
+      "Rewrite it in a more formal, professional register: replace casual words, phrases and contractions with formal ones. Keep the meaning, names and numbers."
   });
   assert.strictEqual(M.commandFor("word.review").actionId, "writer.review");
   assert.strictEqual(M.commandFor("cell.explain").actionId, "cells.ask");

@@ -20,4 +20,8 @@ Guiden API and checks the replies the way the panel does. It needs a key and is 
 GUIDEN_API_KEY=... node plugin/cloudcix-guiden/tests/live.js guiden-live-report.json
 ```
 
-The report holds each request, the raw reply and every check, and never the key.
+The checks cover what would break in the editor and what a careful reader would object to: made-up quotes, contacts
+or datelines, American spelling, a "formal" rewrite that only fixes grammar, review comments on correct Irish English.
+Replies vary from one request to the next, so `GUIDEN_RUNS=3` runs every case three times, and `GUIDEN_TEST="part of
+a case name"` runs only the matching cases. The report holds each request, the raw reply, whether Guiden used
+retrieval and which sources it returned, and every check, and never the key.

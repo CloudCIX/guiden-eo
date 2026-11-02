@@ -95,13 +95,15 @@
       ? 'You are Guiden inside Euro-Office Writer. Answer using the supplied document text and any Guiden retrieval context. Return JSON only: {"answer":"..."}. Do not create citations or URLs; trusted sources are attached by the server.'
       : "You are Guiden inside Euro-Office Writer. " +
         (draft
-          ? "Drafting at an empty cursor is normal: create new content from the instruction and any supplied Guiden retrieval context. Do not require existing document text. "
-          : "Preserve facts, names, numbers, meaning, tense, and existing links. Keep the source's paragraphs as they are unless the instruction asks for a different structure. ") +
-        "Keep the variety of English the text already uses; Irish and British spelling and usage (such as 'organise' or 'the team have') are correct. " +
+          ? "Drafting at an empty cursor is normal: create new content from the instruction and any supplied Guiden retrieval context. Do not require existing document text. " +
+            "When the rest of the document is supplied, the new content must fit its subject, terms, and style; do not repeat or rewrite it. "
+          : "Preserve the facts, names, numbers, meaning, tense, and existing links, and change the wording, tone, and sentence structure as much as the instruction asks. " +
+            "Keep one paragraph for each source paragraph unless the instruction asks for a different structure. ") +
         'For a valid result return JSON only: {"status":"ready","replacementHtml":"safe document HTML"}. ' +
         'If facts the request depends on are genuinely missing, return {"status":"needs_input","message":"a specific explanation of what is needed"}; never put a refusal or explanation in replacementHtml. ' +
         "Use only facts from the instruction, the document, and supplied retrieval context, and use each fact only for what it is. " +
-        "Never make up quotes, people, dates, places, prices, figures, contact details, or facts about real companies, products, or laws. " +
+        "Never make up quotes, people, dates, places (including the city in a press release dateline), prices, figures, contact details, sign-in or access details, or facts about real companies, products, or laws. " +
+        "Facts in retrieval context about one product or service do not apply to another unless the context says so. " +
         "Where the format calls for a detail you were not given, such as a spokesperson quote or a media contact, write a short placeholder in square brackets, such as [Spokesperson quote]. " +
         "Allowed HTML: h1,h2,h3,p,strong,em,a,ul,ol,li,blockquote,table,thead,tbody,tr,th,td,br. Put every paragraph in its own <p>, even when there is only one. " +
         "Use only hyperlinks already present in source HTML or supplied retrieval context; never invent or repair a URL.";
@@ -114,7 +116,11 @@
       optionsText(options) +
       "\n\nSource text:\n" +
       snapshot.text +
-      (snapshot.sourceHtml ? "\n\nSource HTML (preserve its safe hyperlinks):\n" + snapshot.sourceHtml : "");
+      (snapshot.sourceHtml ? "\n\nSource HTML (preserve its safe hyperlinks):\n" + snapshot.sourceHtml : "") +
+      (draft && snapshot.contextText
+        ? "\n\nThe rest of the document, for context only (write new content that fits it; do not repeat it):\n" +
+          snapshot.contextText
+        : "");
     return C.groundedMessages(system, context, instruction);
   }
 
@@ -251,7 +257,7 @@
         "Each quote is a short phrase of 2 to 12 words copied exactly, character for character, from the source text, " +
         "long enough to be unique. Each comment says what the problem is and how to fix it, in one or two sentences. " +
         "Comment only where something is actually wrong, unclear, or missing; leave correct text alone, and leave out weak comments. " +
-        "Keep the variety of English the document uses; Irish and British spelling and usage (such as 'organise' or 'the team have') are correct. " +
+        "Never comment on a collective noun with a plural verb, such as 'the team have': it is correct Irish English, not an agreement error. " +
         "Name grammar accurately: only call something passive when it is in the passive voice. " +
         "Comment on each phrase once and never quote overlapping phrases; put every point about the same words in one comment. " +
         "Give at most 15 comments, the most important first, and an empty list when nothing needs a comment. " +

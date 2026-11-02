@@ -9,11 +9,19 @@
     "Translate into " + language + ". Keep the meaning, names, numbers, links and formatting.";
   // [id, label, instruction] for Change tone.
   const TONES = [
-    ["formal", "More formal", "Make it more formal and professional. Keep the meaning, names and numbers."],
-    ["friendly", "Friendlier", "Make it friendlier and warmer while staying professional. Keep the meaning."],
-    ["concise", "More concise", "Make it more concise without losing any information."],
-    ["simple", "Simpler", "Use plain English: simpler words and shorter sentences. Keep the meaning."],
-    ["confident", "More confident", "Make it more confident and direct. Keep the meaning."]
+    [
+      "formal",
+      "More formal",
+      "Rewrite it in a more formal, professional register: replace casual words, phrases and contractions with formal ones. Keep the meaning, names and numbers."
+    ],
+    [
+      "friendly",
+      "Friendlier",
+      "Rewrite it to sound friendlier and warmer while staying professional. Keep the meaning."
+    ],
+    ["concise", "More concise", "Rewrite it more concisely without losing any information."],
+    ["simple", "Simpler", "Rewrite it in plain English: simpler words and shorter sentences. Keep the meaning."],
+    ["confident", "More confident", "Rewrite it to sound more confident and direct. Keep the meaning."]
   ];
 
   // id -> what the panel should do. The id is what the editor sends back when the item is clicked.
@@ -33,7 +41,7 @@
       run: true,
       label: "Explain formulas",
       instruction:
-        "Explain what the formulas in the selection calculate, step by step, in plain language. If there are no formulas, explain what the values show."
+        "Explain what each formula in the selection calculates, in plain language, then work it through step by step with the cells' actual values. If there are no formulas, explain what the values show."
     },
     "cell.formula": { actionId: "cells.formula", run: false, label: "Create formula…" },
     "cell.format": { actionId: "cells.format", run: false, label: "Format cells…" },
