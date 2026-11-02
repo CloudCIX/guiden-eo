@@ -16,29 +16,151 @@
   </head>
   <body>
     <main class="shell">
-      <header class="topbar"><div><div class="eyebrow">CloudCIX</div><h1>Guiden®</h1><p>Your Euro-Office assistant</p></div></header>
-      <div class="context-bar" id="contextBar" aria-live="polite"><span class="context-dot"></span><span id="contextText">Connecting to Euro-Office…</span><button id="refreshContext" class="icon-button" type="button" aria-label="Refresh current selection" title="Refresh selection">↻</button></div>
+      <header class="topbar">
+        <div>
+          <div class="eyebrow">CloudCIX</div>
+          <h1>Guiden®</h1>
+          <p>Your Euro-Office assistant</p>
+        </div>
+      </header>
+      <div class="context-bar" id="contextBar" aria-live="polite">
+        <span class="context-dot"></span><span id="contextText">Connecting to Euro-Office…</span
+        ><button
+          id="refreshContext"
+          class="icon-button"
+          type="button"
+          aria-label="Refresh current selection"
+          title="Refresh selection"
+        >
+          ↻
+        </button>
+      </div>
       <div class="status" id="status" role="status"></div>
       <section class="group result-group" id="resultGroup" hidden>
-        <div class="preview-heading"><div><div class="section-title">Preview</div><div id="operationSummary" class="operation-summary"></div></div><span id="previewBadge" class="badge"></span></div>
-        <div id="targetWarning" class="warning" hidden></div><div class="preview" id="preview"></div><div id="sources" class="sources" hidden></div>
-        <div class="result-actions"><button id="apply" class="primary" type="button">Apply</button><button id="insertKnowledge" type="button" hidden>Insert answer</button><button id="copy" type="button">Copy</button><button id="discard" type="button">Discard</button></div>
+        <div class="preview-heading">
+          <div>
+            <div class="section-title">Preview</div>
+            <div id="operationSummary" class="operation-summary"></div>
+          </div>
+          <span id="previewBadge" class="badge"></span>
+        </div>
+        <div id="targetWarning" class="warning" hidden></div>
+        <div class="preview" id="preview"></div>
+        <div id="sources" class="sources" hidden></div>
+        <div class="result-actions">
+          <button id="apply" class="primary" type="button">Apply</button
+          ><button id="insertKnowledge" type="button" hidden>Insert answer</button
+          ><button id="copy" type="button">Copy</button><button id="discard" type="button">Discard</button>
+        </div>
       </section>
       <section class="group">
-        <details class="action-picker" id="actionPicker"><summary><span class="action-current"><small>Current action</small><strong id="selectedActionLabel">Ask</strong><span id="selectedActionDescription">Ask about the selected text or document</span></span><span class="action-picker-change">Change</span></summary><div class="action-picker-panel"><div class="section-title">Choose a different action</div><div class="action-grid" id="actionGrid"></div></div></details>
-        <div class="instruction-block"><label for="prompt" id="promptLabel">What would you like to know?</label><textarea id="prompt" rows="4" autocomplete="off" placeholder="Ask a question about the current selection."></textarea><div class="prompt-hint" id="promptHint">Ask is read-only and will not change your file.</div></div>
-        <details class="output-options" id="outputOptions"><summary>Options</summary><div class="controls-grid">
-          <label class="field compact option writer-option slides-option"><span>Tone</span><select id="tone"><option value="auto">Match the original</option><option value="professional">Professional</option><option value="executive">Executive</option><option value="friendly">Friendly</option><option value="plain">Plain English</option></select></label>
-          <label class="field compact option writer-option slides-option"><span>Length</span><select id="length"><option value="auto">Best fit</option><option value="shorter">Shorter</option><option value="same">About the same</option><option value="longer">More detailed</option></select></label>
-          <label class="field compact option writer-option"><span>Structure</span><select id="structure"><option value="auto">Best fit</option><option value="email">Email</option><option value="report">Report</option><option value="briefing">Briefing</option><option value="bullets">Bullets</option><option value="minutes">Minutes</option></select></label>
-          <label class="field compact option cells-option"><span>Destination</span><select id="destination"><option value="selection">Current selection</option><option value="right">Next column</option><option value="start">Selected starting cell</option></select></label>
-          <label class="field compact option cells-option"><span>Table theme</span><select id="tableTheme"><option value="business">Business blue</option><option value="neutral">Neutral</option><option value="minimal">Minimal</option></select></label>
-          <label class="field compact option slides-option"><span>Slide count</span><select id="slideCount"><option value="1">1 slide</option><option value="3">Up to 3 slides</option><option value="5">Up to 5 slides</option></select></label>
-        </div><label class="remember citation-option"><input id="keepCitations" type="checkbox" checked /> Include source links when inserting</label></details>
-        <div class="actions"><button id="generate" class="primary" type="button">Ask Guiden</button><button id="stop" type="button" disabled>Stop</button><button id="clear" type="button">Clear</button></div>
+        <details class="action-picker" id="actionPicker">
+          <summary>
+            <span class="action-current"
+              ><small>Current action</small><strong id="selectedActionLabel">Ask</strong
+              ><span id="selectedActionDescription">Ask about the selected text or document</span></span
+            ><span class="action-picker-change">Change</span>
+          </summary>
+          <div class="action-picker-panel">
+            <div class="section-title">Choose a different action</div>
+            <div class="action-grid" id="actionGrid"></div>
+          </div>
+        </details>
+        <div class="instruction-block">
+          <label for="prompt" id="promptLabel">What would you like to know?</label
+          ><textarea
+            id="prompt"
+            rows="4"
+            autocomplete="off"
+            placeholder="Ask a question about the current selection."
+          ></textarea>
+          <div class="prompt-hint" id="promptHint">Ask is read-only and will not change your file.</div>
+        </div>
+        <details class="output-options" id="outputOptions">
+          <summary>Options</summary>
+          <div class="controls-grid">
+            <label class="field compact option writer-option slides-option"
+              ><span>Tone</span
+              ><select id="tone">
+                <option value="auto">Match the original</option>
+                <option value="professional">Professional</option>
+                <option value="executive">Executive</option>
+                <option value="friendly">Friendly</option>
+                <option value="plain">Plain English</option>
+              </select></label
+            >
+            <label class="field compact option writer-option slides-option"
+              ><span>Length</span
+              ><select id="length">
+                <option value="auto">Best fit</option>
+                <option value="shorter">Shorter</option>
+                <option value="same">About the same</option>
+                <option value="longer">More detailed</option>
+              </select></label
+            >
+            <label class="field compact option writer-option"
+              ><span>Structure</span
+              ><select id="structure">
+                <option value="auto">Best fit</option>
+                <option value="email">Email</option>
+                <option value="report">Report</option>
+                <option value="briefing">Briefing</option>
+                <option value="bullets">Bullets</option>
+                <option value="minutes">Minutes</option>
+              </select></label
+            >
+            <label class="field compact option cells-option"
+              ><span>Destination</span
+              ><select id="destination">
+                <option value="selection">Current selection</option>
+                <option value="right">Next column</option>
+                <option value="start">Selected starting cell</option>
+              </select></label
+            >
+            <label class="field compact option cells-option"
+              ><span>Table theme</span
+              ><select id="tableTheme">
+                <option value="business">Business blue</option>
+                <option value="neutral">Neutral</option>
+                <option value="minimal">Minimal</option>
+              </select></label
+            >
+            <label class="field compact option slides-option"
+              ><span>Slide count</span
+              ><select id="slideCount">
+                <option value="1">1 slide</option>
+                <option value="3">Up to 3 slides</option>
+                <option value="5">Up to 5 slides</option>
+              </select></label
+            >
+          </div>
+          <label class="remember citation-option"
+            ><input id="keepCitations" type="checkbox" checked /> Include source links when inserting</label
+          >
+        </details>
+        <div class="actions">
+          <button id="generate" class="primary" type="button">Ask Guiden</button
+          ><button id="stop" type="button" disabled>Stop</button><button id="clear" type="button">Clear</button>
+        </div>
       </section>
       <button id="undo" class="undo-button" type="button" hidden>Undo last Guiden action</button>
-      <section class="group settings"><details id="settings"><summary>Settings</summary><p id="managedKeyNote" class="managed-note" hidden>Your CloudCIX account provides the API key for this editor.</p><label class="field" id="apiKeyField"><span>CloudCIX API key</span><input id="apiKey" type="password" autocomplete="off" /></label><label class="remember" id="rememberKeyField"><input id="rememberKey" type="checkbox" /> Remember key on this browser</label><div class="settings-actions"><button id="saveSettings" type="button">Save settings</button><button id="testConnection" type="button">Test connection</button></div></details></section>
+      <section class="group settings">
+        <details id="settings">
+          <summary>Settings</summary>
+          <p id="managedKeyNote" class="managed-note" hidden>
+            Your CloudCIX account provides the API key for this editor.
+          </p>
+          <label class="field" id="apiKeyField"
+            ><span>CloudCIX API key</span><input id="apiKey" type="password" autocomplete="off" /></label
+          ><label class="remember" id="rememberKeyField"
+            ><input id="rememberKey" type="checkbox" /> Remember key on this browser</label
+          >
+          <div class="settings-actions">
+            <button id="saveSettings" type="button">Save settings</button
+            ><button id="testConnection" type="button">Test connection</button>
+          </div>
+        </details>
+      </section>
     </main>
   </body>
 </html>

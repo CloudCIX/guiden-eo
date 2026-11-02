@@ -1,0 +1,15 @@
+{
+  "name": "guiden-eo",
+  "private": true,
+  "description": "Development tools for the CloudCIX Guiden Euro-Office plugin. The plugin itself has no dependencies.",
+  "scripts": {
+    "test": "node plugin/cloudcix-guiden/tests/run.js",
+    "test:browser": "node plugin/cloudcix-guiden/tests/browser.js",
+    "format": "prettier --write plugin/cloudcix-guiden",
+    "format:check": "prettier --check plugin/cloudcix-guiden"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0",
+    "prettier": "3.3.3"
+  }
+}

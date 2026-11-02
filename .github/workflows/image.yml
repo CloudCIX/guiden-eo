@@ -1,6 +1,6 @@
 # Builds the Euro-Office image with Guiden built in, and publishes it to ghcr.io/cloudcix/guiden-eo.
 # Pull requests are built and tested but not published. Pushes to main publish `main` and `sha-<commit>`;
-# a tag such as v2.0.17 also publishes `2.0.17`. Deployments should pin the digest the job prints.
+# a tag such as v2.1.0 also publishes `2.1.0`. Deployments should pin the digest the job prints.
 name: image
 
 on:
@@ -26,8 +26,17 @@ jobs:
         with:
           node-version: 22
 
+      - name: Install the test tools
+        run: npm ci && npx playwright install --with-deps chromium
+
+      - name: Check formatting
+        run: npm run format:check
+
       - name: Test the plugin
-        run: node plugin/cloudcix-guiden/tests/run.js
+        run: npm test
+
+      - name: Test the panel in a browser
+        run: npm run test:browser
 
       - name: Tag names
         id: meta

@@ -127,10 +127,21 @@ it belongs to, as it is when they type it, so give each person their own key and
 
 ## Tests
 
-The V2 validation and mocked-host suite has no package dependencies:
+The plugin has no dependencies. The unit and mocked-editor suite runs on Node alone:
 
 ```sh
 node plugin/cloudcix-guiden/tests/run.js
 ```
 
-Manual release QA is still required in Writer, Cells, and Slides because host API support varies between Euro-Office builds.
+The browser suite opens the real panel in Chromium against a fake Writer editor and a fake Guiden API, and checks what
+a person sees: previews, Apply, Copy, Company Knowledge, a provided key and the dark theme. It and the formatting check
+need the development tools in `package.json`:
+
+```sh
+npm ci && npx playwright install chromium
+npm test && npm run test:browser
+npm run format:check   # npm run format rewrites the files
+```
+
+GitHub Actions runs all three on every pull request. Manual release QA is still required in Writer, Cells, and Slides
+because host API support varies between Euro-Office builds.
