@@ -39,7 +39,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  min-width: 286px;
+  min-width: 0;
   min-height: 0;
   overflow-y: scroll;
   overflow-anchor: none;
@@ -1197,4 +1197,56 @@ html.theme-dark .action-picker-change {
   margin: 0 0 8px;
   color: var(--muted);
   font-size: 12px;
+}
+
+/* First run: the connect card replaces the work area until a key is connected. */
+body.needs-key .work {
+  display: none !important;
+}
+.connect-card {
+  border-color: var(--brand-cyan);
+}
+.connect-lead {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.connect-card .actions {
+  margin-top: 10px;
+}
+.connect-card .status:empty {
+  display: none;
+}
+.shortcut-hint {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: right;
+}
+html.theme-dark .connect-lead,
+html.theme-dark .shortcut-hint {
+  color: var(--muted) !important;
+}
+.connect-card .status {
+  margin-top: 10px;
+}
+.connect-card .actions {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* The editor's side panel can be narrow: keep the header to one line. */
+@media (max-width: 300px) {
+  .topbar p {
+    display: none;
+  }
+  .shell {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+  .topbar {
+    margin-left: -8px;
+    margin-right: -8px;
+    padding: 8px 10px;
+  }
 }

@@ -23,7 +23,10 @@
     refreshTimer: null,
     selectionVersion: 0,
     saveTimer: null,
-    managed: null
+    managed: null,
+    // A command from the toolbar or right-click menu waiting for a key (pendingRun) or for the current request to end.
+    pendingRun: null,
+    queuedRun: null
   };
   const editorNames = { word: "Writer", cell: "Cells", slide: "Slides" };
   const defaultActions = { word: "writer.draft", cell: "cells.ask", slide: "slides.ask" };
@@ -149,24 +152,31 @@
       const next = { bold: style.bold || tag === "STRONG", italic: style.italic || tag === "EM" };
       Array.from(node.childNodes).forEach(child => collect(child, next, output));
     }
-    function add(node, prefix, paragraphStyle) {
+    // list is { kind: "bullet" | "numbered", id, marker }: one id per <ul>/<ol>, so each numbered list starts at 1, and
+    // a marker for editors that cannot make real lists.
+    function add(node, paragraphStyle, list) {
       const output = [];
-      if (prefix) output.push({ text: prefix, bold: false, italic: false });
       collect(node, {}, output);
-      if (output.some(item => item.text)) blocks.push({ segments: output, paragraphStyle: paragraphStyle || "" });
+      if (output.some(item => item.text))
+        blocks.push({ segments: output, paragraphStyle: paragraphStyle || "", list: list || null });
     }
+    let lists = 0;
     Array.from(template.content.childNodes).forEach(node => {
       if (node.nodeType === 3) {
-        if (String(node.textContent || "").trim()) add(node, "", "");
+        if (String(node.textContent || "").trim()) add(node, "");
         return;
       }
       const tag = node.tagName,
         styles = { H1: "Heading 1", H2: "Heading 2", H3: "Heading 3", BLOCKQUOTE: "Quote" };
       if (tag === "UL" || tag === "OL") {
+        const kind = tag === "OL" ? "numbered" : "bullet",
+          id = (lists += 1);
         Array.from(node.children)
           .filter(child => child.tagName === "LI")
-          .forEach((item, index) => add(item, tag === "OL" ? index + 1 + ". " : "• ", "List Paragraph"));
-      } else add(node, "", styles[tag] || "");
+          .forEach((item, index) =>
+            add(item, "List Paragraph", { kind, id, marker: kind === "numbered" ? index + 1 + ". " : "• " })
+          );
+      } else add(node, styles[tag] || "");
     });
     return { supported: true, blocks, linkCount };
   }
@@ -179,9 +189,100 @@
     $("apiKeyField").hidden = Boolean(state.managed);
     $("rememberKeyField").hidden = Boolean(state.managed);
     $("managedKeyNote").hidden = !state.managed;
+    if (state.managed) showConnect(false);
   }
   function currentKey() {
     return state.managed ? state.managed.key : $("apiKey").value.trim();
+  }
+  function plugin() {
+    return (global.Asc && global.Asc.plugin) || null;
+  }
+  // True when the panel runs as a window of the background plugin; editor events then come from the background.
+  function inWindow() {
+    const p = plugin();
+    return Boolean(p && p.windowID);
+  }
+
+  // First run: a card that checks the key with CloudCIX once and remembers it, then carries on with what was asked.
+  function showConnect(show, message) {
+    $("connectCard").hidden = !show;
+    document.body.classList.toggle("needs-key", show);
+    if (!show) return;
+    const pending = state.pendingRun && G.actions[state.pendingRun.actionId];
+    $("connectLead").textContent = pending
+      ? "Paste your CloudCIX API key and Guiden will " + pending.label.toLowerCase() + " straight after."
+      : "Paste your CloudCIX API key to start. Guiden checks it once and remembers it on this browser.";
+    connectMessage(message || "", message ? "error" : "");
+    setTimeout(() => $("connectKey").focus(), 0);
+  }
+  function connectMessage(text, mode) {
+    $("connectStatus").textContent = text;
+    $("connectStatus").className = "status " + (mode || "");
+  }
+  function storeKey(key, remember) {
+    try {
+      localStorage.setItem(STORAGE.remember, remember ? "1" : "0");
+      if (remember) localStorage.setItem(STORAGE.key, key);
+      else localStorage.removeItem(STORAGE.key);
+    } catch (_) {}
+  }
+  async function connect() {
+    const key = $("connectKey").value.trim(),
+      reference = diagnosticReference(),
+      button = $("connectButton");
+    if (!key) {
+      connectMessage("Paste your CloudCIX API key first.", "error");
+      return;
+    }
+    button.disabled = true;
+    button.textContent = "Checking…";
+    connectMessage("Checking the key with CloudCIX…", "loading");
+    try {
+      await G.api.test(key, new AbortController().signal);
+      $("apiKey").value = key;
+      $("rememberKey").checked = $("connectRemember").checked;
+      storeKey(key, $("connectRemember").checked);
+      $("connectKey").value = "";
+      showConnect(false);
+      setStatus("Connected. Guiden is ready.", "done");
+      const next = state.pendingRun;
+      state.pendingRun = null;
+      if (next) handleRun(next);
+      else $("prompt").focus();
+    } catch (error) {
+      logFailure("connect", error, {}, reference);
+      connectMessage((error.message || "Connection failed.") + " Reference: " + reference, "error");
+    } finally {
+      button.disabled = false;
+      button.textContent = "Connect";
+    }
+  }
+
+  // A toolbar or right-click command: { actionId, run, instruction }. "run" commands start straight away; the others
+  // open the action and wait for an instruction.
+  function handleRun(command) {
+    const action = command && G.actions[command.actionId];
+    if (!action || action.editor !== state.editor) return;
+    if (state.busy) {
+      state.queuedRun = command;
+      if (state.controller) state.controller.abort();
+      return;
+    }
+    selectAction(command.actionId, { focus: !command.run });
+    $("prompt").value = command.instruction || "";
+    if (!command.run) {
+      setStatus("Type an instruction, then press " + shortcutName() + ".", "");
+      return;
+    }
+    if (!currentKey()) {
+      state.pendingRun = command;
+      showConnect(true);
+      return;
+    }
+    generate();
+  }
+  function shortcutName() {
+    return /Mac|iPhone|iPad/.test((global.navigator && global.navigator.platform) || "") ? "⌘+Enter" : "Ctrl+Enter";
   }
 
   // Without a theme from the editor (older builds), fall back to the operating system's preference.
@@ -227,6 +328,11 @@
         ? "Generate preview"
         : "Ask Guiden";
     $("stop").disabled = !value;
+    if (!value && state.queuedRun) {
+      const next = state.queuedRun;
+      state.queuedRun = null;
+      setTimeout(() => handleRun(next), 0);
+    }
     $("clear").disabled = value;
     $("apply").disabled = value;
     $("copy").disabled = value;
@@ -334,19 +440,23 @@
     clearTimeout(state.refreshTimer);
     state.refreshTimer = setTimeout(() => refreshContext(true), 250);
   }
+  // The editor's own events only reach the background frame, which forwards selection changes as guidenSelection.
+  // A slow poll covers editors that send neither; it pauses while the panel is closed.
   function attachSelectionEvents() {
-    const plugin = global.Asc && global.Asc.plugin;
-    if (!plugin) return;
-    const attach = plugin.attachEditorEvent || plugin.attachEvent;
-    if (typeof attach === "function")
+    const p = plugin();
+    if (!p) return;
+    if (!inWindow() && typeof p.attachEditorEvent === "function")
       ["onTargetPositionChanged", "onSelectionChanged", "onWorksheetSelectionChanged"].forEach(name => {
         try {
-          attach.call(plugin, name, scheduleRefresh);
+          p.attachEditorEvent(name, scheduleRefresh);
         } catch (_) {}
       });
     global.setInterval(() => {
-      if (!state.busy && !state.suggestion) refreshContext(true);
+      if (!state.busy && !state.suggestion && panelVisible()) refreshContext(true);
     }, 5000);
+  }
+  function panelVisible() {
+    return document.visibilityState !== "hidden" && global.innerWidth > 0;
   }
   function renderActions() {
     const grid = $("actionGrid");
@@ -395,7 +505,7 @@
     if (action.id === "cells.table") $("destination").value = "start";
     $("destination").disabled = true;
   }
-  function selectAction(id) {
+  function selectAction(id, settings) {
     if (!G.actions[id] || G.actions[id].editor !== state.editor) return;
     state.actionId = id;
     state.suggestion = null;
@@ -405,7 +515,7 @@
     $("actionPicker").open = false;
     refreshContext(true);
     setStatus("", "");
-    $("prompt").focus();
+    if (!settings || settings.focus !== false) $("prompt").focus();
   }
   function options() {
     return {
@@ -694,6 +804,10 @@
       );
     if (action.id === "slides.notes") return "Added speaker notes to " + result.target.replace(/ notes$/, "") + ".";
     if (action.id === "slides.new") return "Created 1 new slide.";
+    if (action.editor === "word" && /cursor/i.test(String(result.target || "")))
+      return "Added the draft at the cursor.";
+    if (action.editor === "slide" && /selected/i.test(String(result.target || "")))
+      return "Updated the selected text on the slide.";
     if (action.editor === "slide")
       return (
         "Updated " +
@@ -703,7 +817,8 @@
         result.target +
         "."
       );
-    return "Updated " + result.target + ".";
+    const target = String(result.target || "the document");
+    return "Updated " + target.charAt(0).toLowerCase() + target.slice(1) + ".";
   }
   async function generate() {
     if (state.busy) return;
@@ -714,8 +829,8 @@
     let snapshot = null,
       rawResponse = "";
     if (!key) {
-      setStatus("Add your CloudCIX API key in Settings first.", "error");
-      $("settings").open = true;
+      state.pendingRun = { actionId: action.id, run: true, instruction: $("prompt").value.trim() };
+      showConnect(true);
       return;
     }
     if (!instruction) {
@@ -877,6 +992,11 @@
           reference
         );
         setStatus((error.message || "Unable to generate a result.") + " Reference: " + reference, "error");
+        const status = error.guidenDetails && error.guidenDetails.status;
+        if ((status === 401 || status === 403) && !state.managed) {
+          state.pendingRun = { actionId: action.id, run: true, instruction: $("prompt").value.trim() };
+          showConnect(true, "CloudCIX did not accept the saved API key. Paste a new one to carry on.");
+        }
       }
     } finally {
       state.controller = null;
@@ -1023,6 +1143,9 @@
   }
   async function init() {
     if (state.initialized) return;
+    // Inside the editor, wait for the runtime's init (it brings the editor type, options and theme).
+    const p = plugin();
+    if (p && !p.info) return;
     state.initialized = true;
     loadSettings();
     applyManagedSettings();
@@ -1034,9 +1157,12 @@
     state.editor = await G.host.editorType();
     state.actionId = defaultActions[state.editor];
     renderActions();
+    $("shortcutHint").textContent = shortcutName() + " to run · Esc to stop";
+    if (!currentKey()) showConnect(true);
     await refreshContext(true);
     attachSelectionEvents();
-    setStatus("", "");
+    if (!state.busy) setStatus("", "");
+    if (inWindow() && typeof p.sendToPlugin === "function") p.sendToPlugin("guidenReady", {});
   }
   document.addEventListener("DOMContentLoaded", () => {
     $("actionGrid").addEventListener("click", e => {
@@ -1063,6 +1189,23 @@
       }
     });
     $("refreshContext").addEventListener("click", () => refreshContext(false));
+    $("connectButton").addEventListener("click", connect);
+    $("connectKey").addEventListener("keydown", e => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        connect();
+      }
+    });
+    document.addEventListener("keydown", e => {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        if (!$("connectCard").hidden) connect();
+        else generate();
+      } else if (e.key === "Escape" && state.busy && state.controller) {
+        e.preventDefault();
+        state.controller.abort();
+      }
+    });
     $("saveSettings").addEventListener("click", saveSettings);
     $("testConnection").addEventListener("click", testConnection);
     $("undo").addEventListener("click", async () => {
@@ -1075,15 +1218,26 @@
         setStatus("Undo is not available.", "error");
       }
     });
-    if (global.Asc && global.Asc.plugin) {
-      global.Asc.plugin.init = function () {
+    const p = plugin();
+    if (p) {
+      p.init = function () {
         applyManagedSettings();
-        applyTheme(global.Asc.plugin.theme || (global.Asc.plugin.info && global.Asc.plugin.info.theme));
+        applyTheme(p.theme || (p.info && p.info.theme));
         init();
       };
-      global.Asc.plugin.button = function () {};
-      global.Asc.plugin.onThemeChanged = applyTheme;
-      global.Asc.plugin.onUpdateOptions = applyManagedSettings;
+      p.button = function () {};
+      p.onThemeChanged = applyTheme;
+      p.onUpdateOptions = applyManagedSettings;
+      // Messages from the background frame (background.js).
+      if (typeof p.attachEvent === "function") {
+        p.attachEvent("guidenRun", handleRun);
+        p.attachEvent("guidenSelection", scheduleRefresh);
+        p.attachEvent("guidenTheme", applyTheme);
+        p.attachEvent("guidenOptions", options => {
+          if (p.info) p.info.options = options || {};
+          applyManagedSettings();
+        });
+      }
     }
     init();
   });

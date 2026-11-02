@@ -4,15 +4,15 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>CloudCIX Guiden®</title>
-    <link rel="stylesheet" href="styles/main.css?v=2.1.0" />
+    <link rel="stylesheet" href="styles/main.css?v=2.2.0" />
     <script src="../v1/plugins.js"></script>
-    <script defer src="scripts/core.js?v=2.1.0"></script>
-    <script defer src="scripts/host.js?v=2.1.0"></script>
-    <script defer src="scripts/api.js?v=2.1.0"></script>
-    <script defer src="scripts/writer.js?v=2.1.0"></script>
-    <script defer src="scripts/cells.js?v=2.1.0"></script>
-    <script defer src="scripts/slides.js?v=2.1.0"></script>
-    <script defer src="scripts/app.js?v=2.1.0"></script>
+    <script defer src="scripts/core.js?v=2.2.0"></script>
+    <script defer src="scripts/host.js?v=2.2.0"></script>
+    <script defer src="scripts/api.js?v=2.2.0"></script>
+    <script defer src="scripts/writer.js?v=2.2.0"></script>
+    <script defer src="scripts/cells.js?v=2.2.0"></script>
+    <script defer src="scripts/slides.js?v=2.2.0"></script>
+    <script defer src="scripts/app.js?v=2.2.0"></script>
   </head>
   <body>
     <main class="shell">
@@ -36,7 +36,19 @@
         </button>
       </div>
       <div class="status" id="status" role="status"></div>
-      <section class="group result-group" id="resultGroup" hidden>
+      <section class="group connect-card" id="connectCard" hidden>
+        <div class="section-title">Connect Guiden</div>
+        <p id="connectLead" class="connect-lead">
+          Paste your CloudCIX API key to start. Guiden checks it once and remembers it on this browser.
+        </p>
+        <label class="field"
+          ><span>CloudCIX API key</span><input id="connectKey" type="password" autocomplete="off"
+        /></label>
+        <label class="remember"><input id="connectRemember" type="checkbox" checked /> Remember on this browser</label>
+        <div class="actions"><button id="connectButton" class="primary" type="button">Connect</button></div>
+        <div class="status" id="connectStatus" role="status"></div>
+      </section>
+      <section class="group result-group work" id="resultGroup" hidden>
         <div class="preview-heading">
           <div>
             <div class="section-title">Preview</div>
@@ -53,7 +65,7 @@
           ><button id="copy" type="button">Copy</button><button id="discard" type="button">Discard</button>
         </div>
       </section>
-      <section class="group">
+      <section class="group work">
         <details class="action-picker" id="actionPicker">
           <summary>
             <span class="action-current"
@@ -142,8 +154,9 @@
           <button id="generate" class="primary" type="button">Ask Guiden</button
           ><button id="stop" type="button" disabled>Stop</button><button id="clear" type="button">Clear</button>
         </div>
+        <div class="shortcut-hint" id="shortcutHint">Ctrl+Enter to run · Esc to stop</div>
       </section>
-      <button id="undo" class="undo-button" type="button" hidden>Undo last Guiden action</button>
+      <button id="undo" class="undo-button work" type="button" hidden>Undo last Guiden action</button>
       <section class="group settings">
         <details id="settings">
           <summary>Settings</summary>

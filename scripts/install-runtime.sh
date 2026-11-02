@@ -28,6 +28,8 @@ done
 docker exec "$CONTAINER" mkdir -p "$PLUGIN_ROOT/v1"
 for file in plugins.js plugins-ui.js plugins.css; do
   docker cp "$TMP_DIR/v1/$file" "$CONTAINER:$PLUGIN_ROOT/v1/$file"
+  # The web server prefers a .gz copy when there is one, which would still be the old file.
+  docker exec "$CONTAINER" rm -f "$PLUGIN_ROOT/v1/$file.gz"
 done
 
 echo "Installed ONLYOFFICE plugin runtime to $CONTAINER:$PLUGIN_ROOT/v1"

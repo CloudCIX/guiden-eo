@@ -1,19 +1,29 @@
 {
   "name": "CloudCIX Guiden®",
   "guid": "asc.{7D4A7F73-2BB0-4C0F-82F9-0D0CDA18C621}",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "baseUrl": "",
   "variations": [
     {
       "description": "CloudCIX Guiden® assistant",
-      "EditorsSupport": ["word", "cell", "slide"],
-      "initDataType": "none",
-      "initOnSelectionChanged": true,
+      "url": "background.html",
+      "icons": [
+        "resources/icon.png"
+      ],
       "isViewer": false,
-      "type": "panelRight",
-      "url": "index.html",
-      "icons": ["resources/icon.png"],
-      "buttons": []
+      "EditorsSupport": [
+        "word",
+        "cell",
+        "slide"
+      ],
+      "type": "background",
+      "initDataType": "none",
+      "buttons": [],
+      "events": [
+        "onContextMenuShow",
+        "onContextMenuClick",
+        "onToolbarMenuClick"
+      ]
     }
   ]
 }

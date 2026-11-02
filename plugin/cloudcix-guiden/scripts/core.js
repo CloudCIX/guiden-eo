@@ -121,6 +121,7 @@
     if (op === "neq") return a !== b;
     return false;
   };
+  core.isFormula = value => /^=/.test(String(value == null ? "" : value).trim());
   core.validateUpdates = function (updates, snapshot) {
     if (!Array.isArray(updates) || !updates.length) throw new Error("Guiden did not return any cell changes.");
     const seen = new Set();
@@ -142,7 +143,7 @@
       const actual = snapshot.values[row] && snapshot.values[row][column];
       if (core.canonical(actual) !== core.canonical(update.before))
         throw new Error("A proposed change does not match the original cell value.");
-      if (snapshot.formulas[row] && String(snapshot.formulas[row][column] || "").trim())
+      if (snapshot.formulas[row] && core.isFormula(snapshot.formulas[row][column]))
         throw new Error("Guiden tried to replace a formula. No changes were applied.");
       return { row, column, before: update.before, after: update.after == null ? "" : update.after };
     });
