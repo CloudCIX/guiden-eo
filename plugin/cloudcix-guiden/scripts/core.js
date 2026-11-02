@@ -407,6 +407,7 @@
     if (p.kind === "writer-new" || p.kind === "writer-diff") lines.push(core.htmlText(p.afterHtml));
     if (p.kind === "text-diff") lines.push(p.after);
     if (p.kind === "needs-input") lines.push(p.message);
+    if (p.kind === "comments") (p.comments || []).forEach(c => lines.push("“" + c.quote + "”: " + c.comment));
     if (p.kind === "formula") lines.push(p.formula);
     if (p.kind === "notes") lines.push(p.notes);
     if (p.kind === "new-slide") lines.push(p.title, ...p.bullets.map(b => "• " + b));

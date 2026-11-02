@@ -78,9 +78,26 @@ Guiden starts with the editor. It adds:
   cursor position in a document, the selected cells, or the current slide;
 - the Guiden panel, with a button in the right sidebar. Any action opens it.
 
+- **Change tone** (more formal, friendlier, more concise, simpler, more confident) for selected text in documents and
+  presentations, **Review with comments** for a selection or a whole document, and **Explain formulas** for cells.
+
 Actions such as Improve, Fix and Translate start straight away. Actions that need an instruction (Rewrite, Ask, Draft
 here, Formula and so on) open the panel ready for it; press Ctrl+Enter (⌘+Enter on a Mac) to run and Esc to stop.
 Every change still stops at a preview, and nothing in the file changes until **Apply changes** is clicked.
+
+Working with a result:
+
+- **Changes** shows the words an edit deletes and adds; **Result** shows the clean text. Light edits such as Fix open
+  on Changes.
+- **Refine** in one click (Shorter, Longer, More formal, Friendlier, Simpler) or type a follow-up. Guiden continues
+  the same conversation, so it changes its last answer instead of starting again. When Guiden asks a question, the
+  answer goes in the same box.
+- **Suggest as tracked changes** (documents) makes the edit with Track changes on, word by word, so anyone can accept
+  or reject each change under Collaboration. Guiden turns tracking back off afterwards unless it was already on;
+  when the document already tracks changes, Guiden's edits are always tracked.
+- **Review with comments** adds Guiden's comments to the exact phrases they are about, in the editor's own Comments
+  pane. Comments that do not quote the text exactly are left out.
+- Up and Down in the instruction box step through earlier instructions.
 
 The first time, the panel asks for a CloudCIX API key, checks it, remembers it in that browser (untick **Remember
 on this browser** to keep it for the session only), and then carries on with the action that was clicked. If CloudCIX

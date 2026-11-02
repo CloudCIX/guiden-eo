@@ -27,11 +27,18 @@ window.sentToPlugin = [];
 window.nativeText = [];
 window.nativeLinks = [];
 const setup = window.__setup || {};
-const doc = { text: setup.documentText || "", inserted: [] };
+const doc = { text: setup.documentText || "", inserted: [], tracking: false };
+const search = quote => ((setup.selection || doc.text).includes(quote)
+  ? [{ AddComment(text, author) { window.editorCalls.push(["AddComment", quote, text, author]); return {}; } }]
+  : []);
 window.Api = {
   GetDocument: () => ({
     GetText: () => doc.text,
-    InsertContent(content) { doc.inserted.push(content); window.editorCalls.push(["InsertContent", content.length]); return true; }
+    InsertContent(content) { doc.inserted.push(content); window.editorCalls.push(["InsertContent", content.length]); return true; },
+    Search: search,
+    GetRangeBySelect: () => ({ Search: search, GetText: () => setup.selection || "", GetRange: () => null }),
+    IsTrackRevisions: () => doc.tracking,
+    SetTrackRevisions(on) { doc.tracking = on; window.editorCalls.push(["SetTrackRevisions", on]); }
   }),
   CreateParagraph: () => ({ SetStyle() {}, Push() {}, AddElement() {} }),
   CreateRun: () => ({ AddText(text) { window.nativeText.push(text); }, SetBold() {}, SetItalic() {}, AddLineBreak() {} }),
@@ -139,6 +146,7 @@ test("Writer opens on Draft New Content with the action list collapsed, in the a
       "writer.fix",
       "writer.summarise",
       "writer.ask",
+      "writer.review",
       "knowledge.word",
       "writer.convert"
     ]);
@@ -349,6 +357,141 @@ test("changing a selection shows the original text behind a disclosure", async (
     await generate(t.page, "Improve it");
     assert.strictEqual(await text(t.page, "#preview .before-disclosure summary"), "View original text");
     assert.match(await text(t.page, "#preview .before-disclosure div"), /Worse text\./);
+  } finally {
+    await t.close();
+  }
+});
+
+test("a light edit previews as marked changes, and Result shows the clean version", async () => {
+  const reply = sse([delta(JSON.stringify({ status: "ready", replacementHtml: "<p>The figures are final.</p>" }))]);
+  const t = await open(Object.assign({ selection: "The figures is final." }, typedKey), reply);
+  try {
+    await chooseAction(t.page, "writer.fix");
+    await generate(t.page, "");
+    assert.strictEqual(await text(t.page, "#preview del"), "is");
+    assert.strictEqual(await text(t.page, "#preview ins"), "are");
+    assert.strictEqual(await hidden(t.page, "#preview [data-view-panel=result]"), true);
+    await t.page.click('#preview button[data-view="result"]');
+    assert.strictEqual(await hidden(t.page, "#preview [data-view-panel=changes]"), true);
+    assert.match(await text(t.page, "#preview [data-view-panel=result] .response-flow"), /The figures are final\./);
+  } finally {
+    await t.close();
+  }
+});
+
+test("one click refines a result, carrying on the same conversation, and Apply uses the refined text", async () => {
+  const first = sse([delta(JSON.stringify({ status: "ready", replacementHtml: "<p>A long, detailed intro.</p>" }))]);
+  const second = sse([delta(JSON.stringify({ status: "ready", replacementHtml: "<p>Short intro.</p>" }))]);
+  const t = await open(Object.assign({ selection: "Intro." }, typedKey), n => (n === 1 ? first : second));
+  try {
+    await chooseAction(t.page, "writer.improve");
+    await generate(t.page, "Improve it");
+    assert.strictEqual(await hidden(t.page, "#refine"), false);
+    await t.page.click('#refineChips button[data-refine="Make it shorter."]');
+    await idle(t.page);
+    const messages = t.requests[1].body.messages;
+    assert.deepStrictEqual(
+      messages.slice(-3).map(m => m.role),
+      ["user", "assistant", "user"]
+    );
+    assert.strictEqual(messages[messages.length - 1].content, "Make it shorter.");
+    assert.match(messages[messages.length - 2].content, /A long, detailed intro/);
+    assert.strictEqual(messages[messages.length - 3].content, "Improve it");
+    assert.match(await text(t.page, "#preview [data-view-panel=result] .response-flow"), /Short intro\./);
+    await t.page.click("#apply");
+    await idle(t.page);
+    assert.strictEqual(await t.page.evaluate(() => window.nativeText.join("")), "Short intro.");
+  } finally {
+    await t.close();
+  }
+});
+
+test("Guiden's question is answered in the follow-up box", async () => {
+  const question = sse([delta(JSON.stringify({ status: "needs_input", message: "Who is the audience?" }))]);
+  const draft = sse([delta(JSON.stringify({ status: "ready", replacementHtml: "<p>Hello, partners.</p>" }))]);
+  const t = await open(typedKey, n => (n === 1 ? question : draft));
+  try {
+    await generate(t.page, "Write an intro");
+    assert.strictEqual(await hidden(t.page, "#refineChips"), true, "no tone chips for a question");
+    assert.strictEqual(await t.page.$eval("#refineText", el => el.placeholder), "Answer Guiden's question…");
+    await t.page.fill("#refineText", "Our partners");
+    await t.page.press("#refineText", "Enter");
+    await idle(t.page);
+    assert.strictEqual(t.requests[1].body.messages.pop().content, "Our partners");
+    assert.strictEqual(await hidden(t.page, "#apply"), false);
+  } finally {
+    await t.close();
+  }
+});
+
+test("Up and Down in the instruction box step through earlier instructions", async () => {
+  const reply = sse([delta(JSON.stringify({ answer: "Fine." }))]);
+  const t = await open(typedKey, reply);
+  try {
+    await chooseAction(t.page, "writer.ask");
+    await generate(t.page, "first question");
+    await generate(t.page, "second question");
+    await t.page.fill("#prompt", "");
+    await t.page.focus("#prompt");
+    await t.page.keyboard.press("ArrowUp");
+    assert.strictEqual(await t.page.inputValue("#prompt"), "second question");
+    await t.page.keyboard.press("Home");
+    await t.page.keyboard.press("ArrowUp");
+    assert.strictEqual(await t.page.inputValue("#prompt"), "first question");
+    await t.page.keyboard.press("End");
+    await t.page.keyboard.press("ArrowDown");
+    assert.strictEqual(await t.page.inputValue("#prompt"), "second question");
+  } finally {
+    await t.close();
+  }
+});
+
+test("Review with Comments lists the comments and adds them to the quoted text", async () => {
+  const reply = sse([
+    delta(
+      JSON.stringify({
+        status: "ready",
+        comments: [
+          { quote: "figures is final", comment: "Use “are”: figures is plural." },
+          { quote: "made up", comment: "Dropped: not in the text." }
+        ]
+      })
+    )
+  ]);
+  const t = await open(Object.assign({ selection: "The figures is final." }, typedKey), reply);
+  try {
+    await chooseAction(t.page, "writer.review");
+    await generate(t.page, "");
+    assert.match(await text(t.page, "#preview .change-count"), /^1 comment will be added/);
+    assert.match(await text(t.page, "#targetWarning"), /1 comment was left out/);
+    assert.strictEqual(await text(t.page, "#apply"), "Add comments");
+    assert.strictEqual(await hidden(t.page, "#trackOption"), true);
+    await t.page.click("#apply");
+    await idle(t.page);
+    const calls = await t.page.evaluate(() => window.editorCalls.filter(call => call[0] === "AddComment"));
+    assert.deepStrictEqual(calls, [["AddComment", "figures is final", "Use “are”: figures is plural.", "Guiden"]]);
+    assert.match(await text(t.page, "#status"), /Added 1 comment\. They are in the Comments pane\./);
+  } finally {
+    await t.close();
+  }
+});
+
+test("Suggest as tracked changes is remembered and turns tracking on only for the edit", async () => {
+  const reply = sse([delta(JSON.stringify({ status: "ready", replacementHtml: "<p>The figures are final.</p>" }))]);
+  const t = await open(Object.assign({ selection: "The figures is final." }, typedKey), reply);
+  try {
+    await chooseAction(t.page, "writer.fix");
+    await generate(t.page, "");
+    assert.strictEqual(await hidden(t.page, "#trackOption"), false);
+    await t.page.check("#trackChanges");
+    await t.page.click("#apply");
+    await idle(t.page);
+    const tracking = await t.page.evaluate(() =>
+      window.editorCalls.filter(call => call[0] === "SetTrackRevisions").map(call => call[1])
+    );
+    assert.deepStrictEqual(tracking, [true, false]);
+    assert.match(await text(t.page, "#status"), /as tracked changes/);
+    assert.strictEqual(await t.page.evaluate(() => localStorage.getItem("cloudcix-guiden.trackChanges")), "1");
   } finally {
     await t.close();
   }

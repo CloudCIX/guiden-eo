@@ -10,7 +10,9 @@
     tone: "cloudcix-guiden.tone",
     length: "cloudcix-guiden.length",
     structure: "cloudcix-guiden.structure",
-    citations: "cloudcix-guiden.keepCitations"
+    citations: "cloudcix-guiden.keepCitations",
+    track: "cloudcix-guiden.trackChanges",
+    history: "cloudcix-guiden.history"
   };
   const state = {
     initialized: false,
@@ -21,12 +23,14 @@
     busy: false,
     controller: null,
     refreshTimer: null,
-    selectionVersion: 0,
     saveTimer: null,
     managed: null,
     // A command from the toolbar or right-click menu waiting for a key (pendingRun) or for the current request to end.
     pendingRun: null,
-    queuedRun: null
+    queuedRun: null,
+    // Position in the instruction history while Up and Down step through it; -1 is the text being typed.
+    historyIndex: -1,
+    draftPrompt: ""
   };
   const editorNames = { word: "Writer", cell: "Cells", slide: "Slides" };
   const defaultActions = { word: "writer.draft", cell: "cells.ask", slide: "slides.ask" };
@@ -38,6 +42,7 @@
       "writer.fix",
       "writer.summarise",
       "writer.ask",
+      "writer.review",
       "knowledge.word",
       "writer.convert"
     ]
@@ -436,7 +441,6 @@
     }
   }
   function scheduleRefresh() {
-    state.selectionVersion += 1;
     clearTimeout(state.refreshTimer);
     state.refreshTimer = setTimeout(() => refreshContext(true), 250);
   }
@@ -580,6 +584,8 @@
     preview.innerHTML =
       "<div class=stream-lead><span></span>Guiden is writing…</div><div class=stream-output>Waiting for the first words…</div>";
     if (resultActions) resultActions.hidden = true;
+    $("refine").hidden = true;
+    $("trackOption").hidden = true;
     $("resultGroup").hidden = false;
     try {
       $("resultGroup").scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -609,6 +615,114 @@
     $("previewBadge").className = "badge failed";
     if (lead) lead.textContent = label + " — this incomplete response cannot be applied.";
   }
+  // The words a change deletes and adds, marked up, and how much of the original it changes (0 to 1). null when the
+  // texts are too long to compare.
+  function changesHtml(before, after) {
+    const paragraphs = text =>
+      String(text || "")
+        .replace(/\r\n?/g, "\n")
+        .split(/\n+/)
+        .map(line => line.trim())
+        .filter(Boolean)
+        .join("\n");
+    const a = paragraphs(before),
+      b = paragraphs(after),
+      edits = a && b ? G.host.wordEdits(a, b) : null;
+    if (!edits) return null;
+    let html = "",
+      offset = 0,
+      removed = 0;
+    edits.forEach(edit => {
+      html += C.escapeHtml(a.slice(offset, edit[0]));
+      if (edit[1] > edit[0]) html += "<del>" + C.escapeHtml(a.slice(edit[0], edit[1])) + "</del>";
+      if (edit[2]) html += "<ins>" + C.escapeHtml(edit[2]) + "</ins>";
+      removed += edit[1] - edit[0];
+      offset = edit[1];
+    });
+    html += C.escapeHtml(a.slice(offset));
+    return { html, ratio: removed / a.length };
+  }
+  // A Changes view (deleted and added words) next to the result. It opens first when the change is a light edit,
+  // such as Fix or Improve; a rewrite or summary opens on the result.
+  function withChanges(before, after, resultHtml) {
+    const changes = changesHtml(before, after);
+    if (!changes) return resultHtml;
+    const first = changes.ratio < 0.6 ? "changes" : "result";
+    return (
+      '<div class="view-toggle" role="group" aria-label="Preview view">' +
+      '<button type="button" data-view="changes" aria-pressed="' +
+      (first === "changes") +
+      '">Changes</button><button type="button" data-view="result" aria-pressed="' +
+      (first === "result") +
+      '">Result</button></div><article class="response-flow diff-view" data-view-panel="changes"' +
+      (first === "changes" ? "" : " hidden") +
+      ">" +
+      changes.html +
+      '</article><div data-view-panel="result"' +
+      (first === "result" ? "" : " hidden") +
+      ">" +
+      resultHtml +
+      "</div>"
+    );
+  }
+  function showView(view) {
+    $("preview")
+      .querySelectorAll("[data-view]")
+      .forEach(b => b.setAttribute("aria-pressed", String(b.dataset.view === view)));
+    $("preview")
+      .querySelectorAll("[data-view-panel]")
+      .forEach(panel => (panel.hidden = panel.dataset.viewPanel !== view));
+  }
+  // Follow-ups on a result. Chips suit text results; the box also answers a needs-input question or asks a
+  // follow-up about an answer.
+  const TEXT_KINDS = ["writer-diff", "writer-new", "text-diff", "answer", "knowledge", "notes"];
+  function showRefine(preview) {
+    const chips = TEXT_KINDS.includes(preview.kind) && !preview.provenanceUnavailable;
+    $("refineChips").hidden = !chips;
+    $("refineText").value = "";
+    $("refineText").placeholder =
+      preview.kind === "needs-input"
+        ? "Answer Guiden's question…"
+        : ["answer", "knowledge", "analysis"].includes(preview.kind)
+          ? "Ask a follow-up…"
+          : "Ask Guiden to change this…";
+    $("refine").hidden = false;
+  }
+  function refine(text) {
+    const followUp = String(text || "").trim();
+    if (!followUp || !state.suggestion || state.busy) return;
+    generate(followUp);
+  }
+
+  // Earlier instructions, newest first, for the Up and Down keys in the prompt.
+  function history() {
+    try {
+      const list = JSON.parse(localStorage.getItem(STORAGE.history) || "[]");
+      return Array.isArray(list) ? list.filter(item => typeof item === "string") : [];
+    } catch (_) {
+      return [];
+    }
+  }
+  function remember(instruction) {
+    const text = String(instruction || "").trim();
+    if (!text) return;
+    try {
+      const list = [text].concat(history().filter(item => item !== text)).slice(0, 20);
+      localStorage.setItem(STORAGE.history, JSON.stringify(list));
+    } catch (_) {}
+    state.historyIndex = -1;
+  }
+  function recall(step) {
+    const list = history();
+    if (!list.length) return false;
+    const next = Math.max(-1, Math.min(list.length - 1, state.historyIndex + step));
+    if (next === state.historyIndex) return false;
+    if (state.historyIndex === -1) state.draftPrompt = $("prompt").value;
+    state.historyIndex = next;
+    $("prompt").value = next === -1 ? state.draftPrompt || "" : list[next];
+    return true;
+  }
+
   function renderPreview(preview) {
     finishStreaming();
     const parts = [];
@@ -634,23 +748,44 @@
       parts.push(
         "<div class=needs-input><strong>Nothing will be changed.</strong> " + C.escapeHtml(preview.message) + "</div>"
       );
+    if (preview.kind === "comments")
+      parts.push(
+        preview.comments.length
+          ? '<div class="change-count">' +
+              preview.comments.length +
+              (preview.comments.length === 1 ? " comment" : " comments") +
+              ' will be added</div><ol class="review-comments">' +
+              preview.comments
+                .map(c => "<li><q>" + C.escapeHtml(c.quote) + "</q><span>" + C.escapeHtml(c.comment) + "</span></li>")
+                .join("") +
+              "</ol>"
+          : '<div class="empty-source">Guiden found nothing that needs a comment.</div>'
+      );
     if (preview.kind === "writer-new")
       parts.push('<article class="response-flow">' + safeRichHtml(preview.afterHtml) + "</article>");
     if (preview.kind === "writer-diff")
       parts.push(
-        '<details class="before-disclosure"><summary>View original text</summary><div>' +
-          textHtml(preview.before) +
-          '</div></details><div class="suggestion-label">Suggested version</div><article class="response-flow">' +
-          safeRichHtml(preview.afterHtml) +
-          "</article>"
+        withChanges(
+          preview.before,
+          C.htmlText(preview.afterHtml),
+          '<details class="before-disclosure"><summary>View original text</summary><div>' +
+            textHtml(preview.before) +
+            '</div></details><div class="suggestion-label">Suggested version</div><article class="response-flow">' +
+            safeRichHtml(preview.afterHtml) +
+            "</article>"
+        )
       );
     if (preview.kind === "text-diff")
       parts.push(
-        '<details class="before-disclosure"><summary>View original text</summary><div>' +
-          textHtml(preview.before) +
-          '</div></details><div class="suggestion-label">Suggested version</div><article class="response-flow">' +
-          textHtml(preview.after) +
-          "</article>"
+        withChanges(
+          preview.before,
+          preview.after,
+          '<details class="before-disclosure"><summary>View original text</summary><div>' +
+            textHtml(preview.before) +
+            '</div></details><div class="suggestion-label">Suggested version</div><article class="response-flow">' +
+            textHtml(preview.after) +
+            "</article>"
+        )
       );
     if (preview.kind === "cell-updates") {
       if (preview.narrative) parts.push(textHtml(preview.narrative));
@@ -804,8 +939,17 @@
       );
     if (action.id === "slides.notes") return "Added speaker notes to " + result.target.replace(/ notes$/, "") + ".";
     if (action.id === "slides.new") return "Created 1 new slide.";
+    if (action.id === "writer.review")
+      return (
+        "Added " +
+        result.changed +
+        (result.changed === 1 ? " comment" : " comments") +
+        (result.missing ? " (" + result.missing + " could not be placed)" : "") +
+        ". They are in the Comments pane."
+      );
+    const tracked = result.tracked ? " as tracked changes; accept or reject them under Collaboration" : "";
     if (action.editor === "word" && /cursor/i.test(String(result.target || "")))
-      return "Added the draft at the cursor.";
+      return tracked ? "Added the draft" + tracked + "." : "Added the draft at the cursor.";
     if (action.editor === "slide" && /selected/i.test(String(result.target || "")))
       return "Updated the selected text on the slide.";
     if (action.editor === "slide")
@@ -818,16 +962,29 @@
         "."
       );
     const target = String(result.target || "the document");
-    return "Updated " + target.charAt(0).toLowerCase() + target.slice(1) + ".";
+    return (
+      (tracked ? "Suggested changes to " : "Updated ") +
+      target.charAt(0).toLowerCase() +
+      target.slice(1) +
+      tracked +
+      "."
+    );
   }
-  async function generate() {
+  // followUp continues the conversation behind the current result ("Make it shorter", or an answer to a question
+  // Guiden asked): the same target, the earlier messages, Guiden's last reply and the follow-up.
+  async function generate(followUp) {
     if (state.busy) return;
-    const action = currentAction(),
+    const previous = typeof followUp === "string" && followUp.trim() && state.suggestion ? state.suggestion : null;
+    const action = previous ? G.actions[previous.actionId] : currentAction(),
       key = currentKey(),
-      instruction = $("prompt").value.trim() || action.defaultInstruction,
+      instruction = previous ? followUp.trim() : $("prompt").value.trim() || action.defaultInstruction,
       reference = diagnosticReference();
     let snapshot = null,
       rawResponse = "";
+    if (!key && previous) {
+      showConnect(true);
+      return;
+    }
     if (!key) {
       state.pendingRun = { actionId: action.id, run: true, instruction: $("prompt").value.trim() };
       showConnect(true);
@@ -843,21 +1000,32 @@
     state.suggestion = null;
     $("resultGroup").hidden = true;
     try {
-      snapshot = await G.host.readSnapshot(state.editor, action.id);
-      snapshot.actionId = action.id;
-      snapshot.options = options();
-      if (action.supportedTargets && !action.supportedTargets.includes(snapshot.target))
-        throw new Error("This action is not available for the current target. Update your selection and try again.");
-      state.context = snapshot;
-      $("contextText").textContent = contextLabel(snapshot);
+      if (previous) snapshot = previous.snapshot;
+      else {
+        if ($("prompt").value.trim()) remember($("prompt").value);
+        snapshot = await G.host.readSnapshot(state.editor, action.id);
+        snapshot.actionId = action.id;
+        snapshot.options = options();
+        if (action.supportedTargets && !action.supportedTargets.includes(snapshot.target))
+          throw new Error("This action is not available for the current target. Update your selection and try again.");
+        state.context = snapshot;
+        $("contextText").textContent = contextLabel(snapshot);
+      }
       setStatus(
         action.mutates
           ? "Guiden is generating a preview for " + snapshot.targetLabel + "…"
           : "Guiden is preparing an answer for " + snapshot.targetLabel + "…",
         "loading"
       );
-      const fitted = C.fitContext(snapshot, action.mutates);
-      const requestMessages = action.buildRequest(fitted.snapshot, instruction, snapshot.options);
+      const fitted = previous
+        ? { truncated: previous.truncated, notice: previous.notice }
+        : C.fitContext(snapshot, action.mutates);
+      const requestMessages = previous
+        ? previous.messages.concat([
+            { role: "assistant", content: previous.raw },
+            { role: "user", content: instruction }
+          ])
+        : action.buildRequest(fitted.snapshot, instruction, snapshot.options);
       beginStreaming(action, snapshot);
       rawResponse = await G.api.complete(key, requestMessages, state.controller.signal, updateStreaming);
       let result;
@@ -931,11 +1099,13 @@
         applicable = action.mutates && !result.needsInput;
       state.suggestion = {
         actionId: action.id,
-        selectionVersion: state.selectionVersion,
         snapshot,
         result,
         preview,
-        raw: rawResponse
+        raw: rawResponse,
+        messages: requestMessages,
+        truncated: fitted.truncated,
+        notice: fitted.notice
       };
       if (fitted.truncated) preview.warning = (preview.warning ? preview.warning + " " : "") + fitted.notice;
       if (result.unverifiedLinks)
@@ -953,9 +1123,18 @@
       $("previewBadge").className =
         "badge " + (result.needsInput ? "attention" : action.mutates ? "mutation" : "readonly");
       renderPreview(preview);
+      showRefine(preview);
       $("apply").hidden = !applicable;
+      $("trackOption").hidden = !(applicable && action.editor === "word" && action.id !== "writer.review");
+      if (preview.kind === "comments" && !preview.comments.length) $("apply").hidden = true;
       $("apply").textContent =
-        action.id === "slides.notes" ? "Add notes" : action.id === "slides.new" ? "Create slide" : "Apply changes";
+        action.id === "slides.notes"
+          ? "Add notes"
+          : action.id === "slides.new"
+            ? "Create slide"
+            : action.id === "writer.review"
+              ? "Add comments"
+              : "Apply changes";
       $("copy").hidden = Boolean(result.needsInput);
       $("insertKnowledge").hidden = !(
         action.canInsert &&
@@ -972,7 +1151,7 @@
             : "Answer ready. Nothing in your file has changed.",
         result.needsInput ? "attention" : "done"
       );
-      localStorage.setItem(STORAGE.prompt, $("prompt").value);
+      if (!previous) localStorage.setItem(STORAGE.prompt, $("prompt").value);
     } catch (error) {
       if (error.name === "AbortError") {
         if (snapshot) failStreaming("Stopped");
@@ -998,6 +1177,16 @@
           showConnect(true, "CloudCIX did not accept the saved API key. Paste a new one to carry on.");
         }
       }
+      // A follow-up that fails leaves the result it started from.
+      if (previous && !state.suggestion) {
+        state.suggestion = previous;
+        renderPreview(previous.preview);
+        showRefine(previous.preview);
+        $("refineText").value = instruction;
+        $("resultGroup").hidden = false;
+        const resultActions = document.querySelector(".result-actions");
+        if (resultActions) resultActions.hidden = false;
+      }
     } finally {
       state.controller = null;
       setBusy(false);
@@ -1012,11 +1201,13 @@
     setBusy(true, "Applying…");
     setStatus("Confirming the target has not changed…", "loading");
     try {
-      if (suggestion.selectionVersion !== state.selectionVersion)
-        throw new Error("The target changed. Generate again for the current selection.");
+      // Re-read the target rather than trusting selection events: the editor also sends them when nothing that
+      // matters changed, such as when the panel opens.
       const valid = await action.revalidateTarget(suggestion.snapshot);
       if (!valid.ok) throw new Error("The target changed. Generate again for the current selection.");
-      const result = await action.apply(suggestion.result, suggestion.snapshot);
+      const result = await action.apply(suggestion.result, suggestion.snapshot, {
+        track: action.editor === "word" && $("trackChanges").checked
+      });
       C.validateApplyResult(result);
       setStatus(appliedMessage(action, result), "done");
       $("resultGroup").hidden = true;
@@ -1043,8 +1234,6 @@
     setBusy(true, "Inserting…");
     try {
       if (state.editor === "slide") {
-        if (s.selectionVersion !== state.selectionVersion)
-          throw new Error("The target changed. Generate again for the current selection.");
         const valid = await G.host.revalidate(s.snapshot);
         if (!valid.ok) throw new Error("The target changed. Generate again for the current selection.");
       }
@@ -1120,6 +1309,7 @@
       });
       if (localStorage.getItem(STORAGE.citations) !== null)
         $("keepCitations").checked = localStorage.getItem(STORAGE.citations) === "1";
+      $("trackChanges").checked = localStorage.getItem(STORAGE.track) === "1";
     } catch (_) {}
   }
   async function testConnection() {
@@ -1169,7 +1359,7 @@
       const b = e.target.closest("button[data-action]");
       if (b) selectAction(b.dataset.action);
     });
-    $("generate").addEventListener("click", generate);
+    $("generate").addEventListener("click", () => generate());
     $("stop").addEventListener("click", () => state.controller && state.controller.abort());
     $("clear").addEventListener("click", () => {
       $("prompt").value = "";
@@ -1177,6 +1367,36 @@
       discard();
     });
     $("apply").addEventListener("click", applySuggestion);
+    $("trackChanges").addEventListener("change", () => {
+      try {
+        localStorage.setItem(STORAGE.track, $("trackChanges").checked ? "1" : "0");
+      } catch (_) {}
+    });
+    $("refineChips").addEventListener("click", e => {
+      const b = e.target.closest("button[data-refine]");
+      if (b) refine(b.dataset.refine);
+    });
+    $("refineSend").addEventListener("click", () => refine($("refineText").value));
+    $("refineText").addEventListener("keydown", e => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        refine($("refineText").value);
+      }
+    });
+    $("preview").addEventListener("click", e => {
+      const b = e.target.closest("button[data-view]");
+      if (b) showView(b.dataset.view);
+    });
+    $("prompt").addEventListener("keydown", e => {
+      if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      const box = $("prompt"),
+        atStart = box.selectionStart === 0 && box.selectionEnd === 0,
+        atEnd = box.selectionStart === box.value.length;
+      if (e.key === "ArrowUp" && (atStart || !box.value) && recall(1)) e.preventDefault();
+      else if (e.key === "ArrowDown" && atEnd && state.historyIndex >= 0 && recall(-1)) e.preventDefault();
+    });
+    $("prompt").addEventListener("input", () => (state.historyIndex = -1));
     $("insertKnowledge").addEventListener("click", insertKnowledge);
     $("discard").addEventListener("click", discard);
     $("copy").addEventListener("click", async () => {

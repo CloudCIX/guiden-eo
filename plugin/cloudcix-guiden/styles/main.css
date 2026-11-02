@@ -1235,6 +1235,114 @@ html.theme-dark .shortcut-hint {
   grid-template-columns: minmax(0, 1fr);
 }
 
+/* Follow-ups on a result: one-click changes and a free-text request. */
+.refine {
+  margin-top: 10px;
+}
+.refine-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.refine-chips button {
+  min-height: 28px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.refine-input {
+  display: flex;
+  gap: 6px;
+}
+.refine-input input {
+  flex: 1;
+  min-width: 0;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--ink);
+  background: var(--surface);
+  font: inherit;
+  font-size: 13px;
+}
+.refine-input input:focus {
+  outline: 2px solid var(--brand-cyan);
+  outline-offset: 0;
+}
+.refine-input button {
+  flex: 0 0 34px;
+  min-height: 34px;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
+}
+.track-option {
+  margin-top: 10px;
+}
+
+/* Review comments in the preview: the quoted phrase, then the comment. */
+.review-comments {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+.review-comments li {
+  margin-bottom: 10px;
+}
+.review-comments q {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: italic;
+}
+
+/* Word-level changes in the preview; each paragraph is on its own line. */
+.diff-view {
+  white-space: pre-wrap;
+}
+.preview del {
+  color: var(--danger);
+  background: rgba(180, 35, 24, 0.08);
+  text-decoration-thickness: 1px;
+}
+.preview ins {
+  color: var(--success);
+  background: rgba(23, 100, 58, 0.1);
+  text-decoration: none;
+  border-bottom: 1px solid currentColor;
+}
+.view-toggle {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.view-toggle button {
+  min-height: 26px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+.view-toggle button[aria-pressed="true"] {
+  color: #ffffff;
+  border-color: var(--brand-blue);
+  background: var(--brand-blue);
+}
+html.theme-dark .refine-input input {
+  color: var(--ink);
+  background: var(--surface);
+}
+html.theme-dark .preview del {
+  color: #ffb4ad;
+  background: rgba(255, 180, 173, 0.12);
+}
+html.theme-dark .preview ins {
+  color: #8fe0ad;
+  background: rgba(143, 224, 173, 0.12);
+}
+
 /* The editor's side panel can be narrow: keep the header to one line. */
 @media (max-width: 300px) {
   .topbar p {

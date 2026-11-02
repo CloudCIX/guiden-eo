@@ -7,6 +7,14 @@
   const LANGUAGES = ["English", "Irish", "French", "German", "Spanish", "Italian", "Dutch", "Polish", "Portuguese"];
   const translate = language =>
     "Translate into " + language + ". Keep the meaning, names, numbers, links and formatting.";
+  // [id, label, instruction] for Change tone.
+  const TONES = [
+    ["formal", "More formal", "Make it more formal and professional. Keep the meaning, names and numbers."],
+    ["friendly", "Friendlier", "Make it friendlier and warmer while staying professional. Keep the meaning."],
+    ["concise", "More concise", "Make it more concise without losing any information."],
+    ["simple", "Simpler", "Use plain English: simpler words and shorter sentences. Keep the meaning."],
+    ["confident", "More confident", "Make it more confident and direct. Keep the meaning."]
+  ];
 
   // id -> what the panel should do. The id is what the editor sends back when the item is clicked.
   const COMMANDS = {
@@ -17,8 +25,16 @@
     "word.ask": { actionId: "writer.ask", run: false, label: "Ask about this…" },
     "word.draft": { actionId: "writer.draft", run: false, label: "Draft here…" },
     "word.knowledge": { actionId: "knowledge.word", run: false, label: "Ask Company Knowledge…" },
+    "word.review": { actionId: "writer.review", run: true, label: "Review with comments" },
     "cell.ask": { actionId: "cells.ask", run: true, label: "Analyse selection" },
     "cell.edit": { actionId: "cells.edit", run: true, label: "Clean up values" },
+    "cell.explain": {
+      actionId: "cells.ask",
+      run: true,
+      label: "Explain formulas",
+      instruction:
+        "Explain what the formulas in the selection calculate, step by step, in plain language. If there are no formulas, explain what the values show."
+    },
     "cell.formula": { actionId: "cells.formula", run: false, label: "Create formula…" },
     "cell.format": { actionId: "cells.format", run: false, label: "Format cells…" },
     "cell.classify": { actionId: "cells.classify", run: false, label: "Classify rows…" },
@@ -32,6 +48,10 @@
     "slide.ask": { actionId: "slides.ask", run: false, label: "Ask about this slide…" },
     "slide.knowledge": { actionId: "knowledge.slide", run: false, label: "Ask Company Knowledge…" }
   };
+  TONES.forEach(tone => {
+    COMMANDS["word.tone." + tone[0]] = { actionId: "writer.rewrite", run: true, label: tone[1], instruction: tone[2] };
+    COMMANDS["slide.tone." + tone[0]] = { actionId: "slides.improve", run: true, label: tone[1], instruction: tone[2] };
+  });
   LANGUAGES.forEach(language => {
     COMMANDS["word.translate." + language] = {
       actionId: "writer.rewrite",
@@ -66,6 +86,9 @@
   function languageItems(prefix) {
     return LANGUAGES.map(language => ({ id: prefix + language, text: language }));
   }
+  function toneItems(prefix) {
+    return TONES.map(tone => ({ id: prefix + tone[0], text: tone[1] }));
+  }
 
   // Right-click menu. type is the editor's menu type: "Selection" when text is selected, "Target" for a plain
   // cursor, and "Shape", "Image" and so on for objects.
@@ -80,17 +103,31 @@
             item("word.fix"),
             item("word.summarise", { text: "Summarise selection" }),
             { id: "word.translate", text: "Translate", items: languageItems("word.translate.") },
+            { id: "word.tone", text: "Change tone", items: toneItems("word.tone.") },
             item("word.rewrite"),
+            item("word.review"),
             item("word.ask", { text: "Ask about selection…" })
           ]
-        : [item("word.draft"), item("word.ask", { text: "Ask about this document…" })];
+        : [
+            item("word.draft"),
+            item("word.review", { text: "Review document with comments" }),
+            item("word.ask", { text: "Ask about this document…" })
+          ];
     } else if (editor === "cell") {
-      items = [item("cell.ask"), item("cell.edit"), item("cell.formula"), item("cell.format"), item("cell.classify")];
+      items = [
+        item("cell.ask"),
+        item("cell.explain"),
+        item("cell.edit"),
+        item("cell.formula"),
+        item("cell.format"),
+        item("cell.classify")
+      ];
     } else if (editor === "slide") {
       items = selected
         ? [
             item("slide.improve"),
             { id: "slide.translate", text: "Translate", items: languageItems("slide.translate.") },
+            { id: "slide.tone", text: "Change tone", items: toneItems("slide.tone.") },
             item("slide.ask")
           ]
         : [item("slide.shorten"), item("slide.notes"), item("slide.rewrite"), item("slide.ask")];
@@ -118,13 +155,18 @@
         button("word.translate", "translate", "Translate", "Translate the selected text", {
           items: languageItems("word.translate.")
         }),
+        button("word.tone", "tone", "Tone", "Change the tone of the selected text", {
+          items: toneItems("word.tone.")
+        }),
         button("word.ask", "ask", "Ask", "Ask a question about the document", { separator: true }),
+        button("word.review", "review", "Review", "Review the selection or document and leave comments"),
         button("word.knowledge", "knowledge", "Company Knowledge", "Ask your company's knowledge")
       ];
     else if (editor === "cell")
       items = [
         open,
         button("cell.ask", "ask", "Analyse", "Analyse the selected cells", { separator: true }),
+        button("cell.explain", "explain", "Explain", "Explain the formulas in the selected cells"),
         button("cell.edit", "improve", "Clean up", "Clean up the selected values"),
         button("cell.formula", "formula", "Formula", "Create a formula for the selected cell"),
         button("cell.format", "format", "Format", "Format the selected cells"),
@@ -146,5 +188,5 @@
     return [{ id: "guiden", text: "Guiden", items }];
   }
 
-  G.menus = { LANGUAGES, COMMANDS, OPEN, commandFor, contextMenu, toolbar, icon };
+  G.menus = { LANGUAGES, TONES, COMMANDS, OPEN, commandFor, contextMenu, toolbar, icon };
 })(typeof window !== "undefined" ? window : globalThis);

@@ -4,15 +4,15 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>CloudCIX Guiden®</title>
-    <link rel="stylesheet" href="styles/main.css?v=2.2.0" />
+    <link rel="stylesheet" href="styles/main.css?v=2.3.0" />
     <script src="../v1/plugins.js"></script>
-    <script defer src="scripts/core.js?v=2.2.0"></script>
-    <script defer src="scripts/host.js?v=2.2.0"></script>
-    <script defer src="scripts/api.js?v=2.2.0"></script>
-    <script defer src="scripts/writer.js?v=2.2.0"></script>
-    <script defer src="scripts/cells.js?v=2.2.0"></script>
-    <script defer src="scripts/slides.js?v=2.2.0"></script>
-    <script defer src="scripts/app.js?v=2.2.0"></script>
+    <script defer src="scripts/core.js?v=2.3.0"></script>
+    <script defer src="scripts/host.js?v=2.3.0"></script>
+    <script defer src="scripts/api.js?v=2.3.0"></script>
+    <script defer src="scripts/writer.js?v=2.3.0"></script>
+    <script defer src="scripts/cells.js?v=2.3.0"></script>
+    <script defer src="scripts/slides.js?v=2.3.0"></script>
+    <script defer src="scripts/app.js?v=2.3.0"></script>
   </head>
   <body>
     <main class="shell">
@@ -59,6 +59,28 @@
         <div id="targetWarning" class="warning" hidden></div>
         <div class="preview" id="preview"></div>
         <div id="sources" class="sources" hidden></div>
+        <div class="refine" id="refine" hidden>
+          <div class="refine-chips" id="refineChips">
+            <button type="button" data-refine="Make it shorter.">Shorter</button
+            ><button type="button" data-refine="Make it longer and more detailed.">Longer</button
+            ><button type="button" data-refine="Make it more formal.">More formal</button
+            ><button type="button" data-refine="Make it friendlier and warmer.">Friendlier</button
+            ><button type="button" data-refine="Use simpler words and shorter sentences.">Simpler</button>
+          </div>
+          <div class="refine-input">
+            <input id="refineText" type="text" autocomplete="off" placeholder="Ask Guiden to change this…" /><button
+              id="refineSend"
+              type="button"
+              aria-label="Send"
+              title="Send"
+            >
+              →
+            </button>
+          </div>
+        </div>
+        <label class="remember track-option" id="trackOption" hidden
+          ><input id="trackChanges" type="checkbox" /> Suggest as tracked changes</label
+        >
         <div class="result-actions">
           <button id="apply" class="primary" type="button">Apply</button
           ><button id="insertKnowledge" type="button" hidden>Insert answer</button
