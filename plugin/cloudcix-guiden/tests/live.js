@@ -93,6 +93,7 @@ const DOC = [
   "Our team have made good progress this quarter, alot of work was done on the new platfrom and customers is happy with it.",
   "Next quarter we will focus on reliability and on reducing the cost of running the service."
 ];
+const CLEAN = ["Our team have made good progress this quarter.", DOC[1]];
 const SALES = [
   ["Region", "Q1", "Q2"],
   ["north", "120", "135"],
@@ -112,7 +113,11 @@ const cases = [
       assert(!result.needsInput, "asked for input: " + result.message);
       assert.strictEqual(blocks(result.replacementHtml), 2, "paragraph count changed: " + result.replacementHtml);
       assert(!/\balot\b|platfrom/.test(result.replacementHtml), "left a spelling mistake");
-      return { blocks: 2, edits: G.host.wordEdits(DOC.join(" "), C.htmlText(result.replacementHtml)).length };
+      return {
+        blocks: 2,
+        edits: G.host.wordEdits(DOC.join(" "), C.htmlText(result.replacementHtml)).length,
+        keptIrishTeamHave: /team have/.test(result.replacementHtml)
+      };
     }
   },
   {
@@ -146,14 +151,15 @@ const cases = [
     }
   },
   {
-    name: "Writer Translate into French",
+    name: "Writer Translate into French keeps the two paragraphs",
     actionId: "writer.rewrite",
-    snapshot: writer("writer.rewrite", DOC[1], "selection"),
+    snapshot: writer("writer.rewrite", CLEAN.join("\r\n") + "\r\n", "selection"),
     instruction: G.menus.commandFor("word.translate.French").instruction,
     check(result) {
       assert(!result.needsInput, "asked for input: " + result.message);
       assert(/\b(le|la|les|nous|des|du|de)\b/i.test(C.htmlText(result.replacementHtml)), "not French");
-      return { text: C.htmlText(result.replacementHtml) };
+      assert.strictEqual(blocks(result.replacementHtml), 2, "paragraph count changed: " + result.replacementHtml);
+      return { html: result.replacementHtml };
     }
   },
   {
@@ -163,6 +169,14 @@ const cases = [
     check(result) {
       assert(!result.needsInput, "asked for input: " + result.message);
       assert(result.comments.length >= 2, "fewer than 2 comments for a text with obvious mistakes");
+      const irish = result.comments.filter(c => /team have/.test(c.quote) && /\bhas\b/.test(c.comment));
+      assert(!irish.length, "flagged Irish English 'team have': " + JSON.stringify(irish));
+      const passive = result.comments.filter(c => /passive/i.test(c.comment) && !/was done/.test(c.quote));
+      assert(!passive.length, "called active text passive: " + JSON.stringify(passive));
+      const overlapping = result.comments.filter((c, i) =>
+        result.comments.some((d, j) => i !== j && d.quote !== c.quote && d.quote.includes(c.quote))
+      );
+      assert(!overlapping.length, "overlapping quotes: " + JSON.stringify(overlapping));
       const long = result.comments.filter(c => words(c.quote) > 12);
       return {
         comments: result.comments.length,
@@ -198,7 +212,11 @@ const cases = [
     checkFollowUp(result) {
       assert(!result.needsInput, "asked again: " + result.message);
       assert(/Guiden/.test(result.replacementHtml), "did not use the answer");
-      return { words: words(result.replacementHtml) };
+      const text = C.htmlText(result.replacementHtml);
+      assert(!/mailto:|[\w.+-]+@[\w-]+\.[a-z]{2,}/i.test(result.replacementHtml), "made up an email contact");
+      assert(!/\+\d{2,3}[\s\d()-]{6,}|\b0\d{1,2}[\s-]?\d{3}[\s-]?\d{4}\b/.test(text), "made up a phone number");
+      assert(!/[“"][^”"]{15,}[”"],?\s+(?:said|says|added)\b/i.test(text), "made up a quote");
+      return { words: words(result.replacementHtml), placeholders: text.match(/\[[^\]]{3,60}\]/g) || [] };
     }
   },
   {
@@ -257,6 +275,8 @@ const cases = [
     check(result) {
       assert(result.replacementText.trim(), "empty");
       assert(!/reliablity/.test(result.replacementText), "left the typo");
+      assert(/\bwill\b|['’]ll\b/i.test(result.replacementText), "changed the tense: " + result.replacementText);
+      assert(/cost/i.test(result.replacementText), "dropped the costs point: " + result.replacementText);
       return { text: result.replacementText };
     }
   },
@@ -265,7 +285,12 @@ const cases = [
     actionId: "slides.notes",
     snapshot: slide("slides.notes", ["Q3 plan", "Reliability first\nLower running costs\nShip the platform"]),
     check(result) {
-      return { result };
+      const notes = result.notes;
+      assert(!/<[a-z][^>]*>|\*\*|^#/im.test(notes), "Markdown or HTML in the notes: " + notes);
+      assert(/reliab/i.test(notes) && /cost/i.test(notes) && /platform/i.test(notes), "missed a point: " + notes);
+      assert(words(notes) >= 20 && words(notes) <= 250, "odd length: " + words(notes) + " words");
+      assert(!/\d+\s?%|€\s?\d/.test(notes), "made up a figure: " + notes);
+      return { words: words(notes), notes };
     }
   }
 ];

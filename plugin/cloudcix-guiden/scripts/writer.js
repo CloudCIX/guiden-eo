@@ -54,6 +54,20 @@
       : { replacementHtml: html, sources: sources || [] };
   }
 
+  // Guiden sometimes returns plain text (a translation, say) with no paragraph tags. Each line becomes a <p>, so the
+  // edit keeps the paragraph breaks and tracked changes can still match paragraph for paragraph.
+  const BLOCK_TAG = /<\s*(?:p|h[1-6]|ul|ol|li|blockquote|table|div)\b/i;
+  function ensureBlocks(html) {
+    const value = String(html || "").trim();
+    if (!value || BLOCK_TAG.test(value)) return value;
+    return value
+      .split(/\s*(?:<br\s*\/?>\s*){2,}|\s*\r?\n\s*/i)
+      .map(part => part.trim())
+      .filter(Boolean)
+      .map(part => "<p>" + part + "</p>")
+      .join("");
+  }
+
   function parseReplacement(content) {
     const data = C.extractJson(content);
     const sources = C.safeSources(data.sources);
@@ -67,7 +81,7 @@
     const html = data.replacementHtml || data.replacement_html;
     if (typeof html !== "string" || !html.trim())
       throw new Error("Guiden did not return validated replacement content. Nothing can be applied.");
-    return replacementResult(html, sources);
+    return replacementResult(ensureBlocks(html), sources);
   }
 
   function optionsText(options) {
@@ -82,11 +96,14 @@
       : "You are Guiden inside Euro-Office Writer. " +
         (draft
           ? "Drafting at an empty cursor is normal: create new content from the instruction and any supplied Guiden retrieval context. Do not require existing document text. "
-          : "Preserve facts, names, numbers, meaning, and existing links. ") +
+          : "Preserve facts, names, numbers, meaning, tense, and existing links. Keep the source's paragraphs as they are unless the instruction asks for a different structure. ") +
+        "Keep the variety of English the text already uses; Irish and British spelling and usage (such as 'organise' or 'the team have') are correct. " +
         'For a valid result return JSON only: {"status":"ready","replacementHtml":"safe document HTML"}. ' +
-        'If required facts or instructions are genuinely missing, return {"status":"needs_input","message":"a specific explanation of what is needed"}; never put a refusal or explanation in replacementHtml. ' +
-        "For company-specific facts, rely on supplied retrieval context and do not invent details. " +
-        "Allowed HTML: h1,h2,h3,p,strong,em,a,ul,ol,li,blockquote,table,thead,tbody,tr,th,td,br. " +
+        'If facts the request depends on are genuinely missing, return {"status":"needs_input","message":"a specific explanation of what is needed"}; never put a refusal or explanation in replacementHtml. ' +
+        "Use only facts from the instruction, the document, and supplied retrieval context, and use each fact only for what it is. " +
+        "Never make up quotes, people, dates, places, prices, figures, contact details, or facts about real companies, products, or laws. " +
+        "Where the format calls for a detail you were not given, such as a spokesperson quote or a media contact, write a short placeholder in square brackets, such as [Spokesperson quote]. " +
+        "Allowed HTML: h1,h2,h3,p,strong,em,a,ul,ol,li,blockquote,table,thead,tbody,tr,th,td,br. Put every paragraph in its own <p>, even when there is only one. " +
         "Use only hyperlinks already present in source HTML or supplied retrieval context; never invent or repair a URL.";
     const context =
       "Action: " +
@@ -204,7 +221,13 @@
         comment = String((item && item.comment) || "").trim();
       if (!quote || !comment || seen.has(quote + "\n" + comment)) return;
       seen.add(quote + "\n" + comment);
-      if (text.indexOf(quote) < 0) unmatched += 1;
+      if (text.indexOf(quote) < 0) {
+        unmatched += 1;
+        return;
+      }
+      // A quote inside another quote would stack two comments on the same words, so the points are joined.
+      const overlap = comments.find(c => c.quote !== quote && (c.quote.includes(quote) || quote.includes(c.quote)));
+      if (overlap) overlap.comment += " " + comment;
       else if (comments.length < REVIEW_LIMIT) comments.push({ quote, comment });
     });
     if (!comments.length && unmatched)
@@ -227,6 +250,10 @@
         'Return JSON only: {"status":"ready","comments":[{"quote":"...","comment":"..."}]}. ' +
         "Each quote is a short phrase of 2 to 12 words copied exactly, character for character, from the source text, " +
         "long enough to be unique. Each comment says what the problem is and how to fix it, in one or two sentences. " +
+        "Comment only where something is actually wrong, unclear, or missing; leave correct text alone, and leave out weak comments. " +
+        "Keep the variety of English the document uses; Irish and British spelling and usage (such as 'organise' or 'the team have') are correct. " +
+        "Name grammar accurately: only call something passive when it is in the passive voice. " +
+        "Comment on each phrase once and never quote overlapping phrases; put every point about the same words in one comment. " +
         "Give at most 15 comments, the most important first, and an empty list when nothing needs a comment. " +
         "Do not rewrite the document.";
       const context = "Target: " + snapshot.targetLabel + "\n\nSource text:\n" + snapshot.text;

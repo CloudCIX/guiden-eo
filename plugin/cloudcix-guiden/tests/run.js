@@ -384,6 +384,25 @@ test("Draft at an empty cursor requests new content rather than source text", ()
   );
   assert.strictEqual(action.buildPreview(result, snapshot).kind, "writer-new");
 });
+test("plain-text replacements become one paragraph per line, so paragraph breaks survive", () => {
+  const rewrite = global.Guiden.actions["writer.rewrite"],
+    parse = html => rewrite.parseResponse(JSON.stringify({ status: "ready", replacementHtml: html })).replacementHtml;
+  assert.strictEqual(parse("Le prochain trimestre."), "<p>Le prochain trimestre.</p>");
+  assert.strictEqual(
+    parse("Premier & deux.\n\nSecond <em>ici</em>."),
+    "<p>Premier & deux.</p><p>Second <em>ici</em>.</p>"
+  );
+  assert.strictEqual(parse("Un.<br><br>Deux."), "<p>Un.</p><p>Deux.</p>");
+  assert.strictEqual(parse("<h2>Titre</h2>\nTexte"), "<h2>Titre</h2>\nTexte");
+  const system = rewrite.buildRequest({ target: "selection", targetLabel: "Selection", text: "x" }, "", {
+    tone: "auto",
+    length: "auto",
+    structure: "auto"
+  })[0].content;
+  assert.match(system, /Irish and British/);
+  assert.match(system, /placeholder in square brackets/);
+  assert.match(system, /tense/);
+});
 test("Ordinary document prose is not mistaken for an assistant refusal", () => {
   const result = global.Guiden.actions["writer.draft"].parseResponse(
     JSON.stringify({ replacementHtml: "<p>This report cannot be completed until Phase 2 begins.</p>" })
@@ -1440,6 +1459,20 @@ test("a review keeps only comments that quote the text exactly", () => {
   );
   assert.strictEqual(result.unmatched, 1);
   assert.match(review.buildPreview(result).warning, /1 comment was left out/);
+  const overlapping = review.parseResponse(
+    JSON.stringify({
+      comments: [
+        { quote: "Costs is high", comment: "Use “are”." },
+        { quote: "Costs is high.", comment: "Say how high." },
+        { quote: "team have", comment: "Fine in Irish English." }
+      ]
+    }),
+    snapshot
+  );
+  assert.deepStrictEqual(overlapping.comments, [
+    { quote: "Costs is high", comment: "Use “are”. Say how high." },
+    { quote: "team have", comment: "Fine in Irish English." }
+  ]);
   assert.deepStrictEqual(review.parseResponse('{"status":"ready","comments":[]}', snapshot).comments, []);
   assert.throws(
     () => review.parseResponse('{"comments":[{"quote":"nowhere","comment":"x"}]}', snapshot),
