@@ -50,23 +50,38 @@
     return { ok: true, changed: changed };
   }
 
+  // One editor call at a time. The panel's calls travel through the background frame and their answers are matched
+  // to callers in order, and the runtime keeps a single callback for commands, so overlapping calls can get each
+  // other's answers. A call the editor never answers fails after callTimeoutMs instead of holding the queue.
+  host.callTimeoutMs = 60000;
+  let queue = Promise.resolve();
+  function serial(call) {
+    const task = () =>
+      new Promise((resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error("Euro-Office did not answer in time. Try again.")),
+          host.callTimeoutMs
+        );
+        const done = value => {
+          clearTimeout(timer);
+          resolve(value);
+        };
+        try {
+          call(done);
+        } catch (e) {
+          clearTimeout(timer);
+          reject(e);
+        }
+      });
+    const result = queue.then(task, task);
+    queue = result.catch(() => {});
+    return result;
+  }
   host.execute = function (name, args) {
-    return new Promise((resolve, reject) => {
-      try {
-        global.Asc.plugin.executeMethod(name, args || [], resolve);
-      } catch (e) {
-        reject(e);
-      }
-    });
+    return serial(done => global.Asc.plugin.executeMethod(name, args || [], done));
   };
   host.command = function (fn) {
-    return new Promise((resolve, reject) => {
-      try {
-        global.Asc.plugin.callCommand(fn, false, true, resolve);
-      } catch (e) {
-        reject(e);
-      }
-    });
+    return serial(done => global.Asc.plugin.callCommand(fn, false, true, done));
   };
   // Runs fn(input) inside the editor. The editor receives the command as source text, so fn can't use anything from
   // this file: input travels as JSON written into the source, and helpers are functions sent along with it.
@@ -153,21 +168,23 @@
     });
     if (!result || !result.ok) throw new Error((result && result.error) || "Unable to read the selected cells.");
     const values = C.normalizeMatrix(result.values),
-      formulas = C.normalizeMatrix(result.formulas),
-      parsed = C.parseA1Address(result.address),
+      // GetFormula returns a plain cell's value too; only text that starts with "=" is a formula.
+      formulas = C.normalizeMatrix(result.formulas).map(row => row.map(f => (C.isFormula(f) ? f : ""))),
+      address = String(result.address || "").replace(/\$/g, ""),
+      parsed = C.parseA1Address(address),
       d = C.matrixDimensions(values);
     const snapshot = {
       editor: "cell",
       actionId,
       sheetName: result.sheet || "Sheet",
-      address: result.address || "selected range",
+      address: address || "selected range",
       start: parsed,
       rows: Number(result.rows) || (parsed && parsed.rows) || d.rows,
       cols: Number(result.cols) || (parsed && parsed.cols) || d.cols,
       values,
       formulas
     };
-    snapshot.target = snapshot.address;
+    snapshot.target = "selection";
     snapshot.targetLabel = snapshot.sheetName + " · " + snapshot.address;
     snapshot.text = values.map(r => r.join("\t")).join("\n");
     snapshot.fingerprint = C.fingerprint({
@@ -245,11 +262,18 @@
       (snapshot.editor !== "slide" || fresh.slideIndex === snapshot.slideIndex);
     return { ok: same, fresh };
   };
-  host.pasteWriter = async function (html) {
-    const payload = G.ui && typeof G.ui.writerNativePayload === "function" ? G.ui.writerNativePayload(html) : null;
-    if (payload && payload.supported && payload.linkCount > 0 && payload.blocks.length) {
-      const result = await host
-        .dynamicCommand(function (input) {
+  // Builds Writer paragraphs from payload blocks and puts them in the document. Runs carry no font of their own, so the
+  // text takes the document's formatting. mode is:
+  // - "inline": a single paragraph's runs go into the paragraph being edited, so it keeps that paragraph's style and
+  //   leaves no empty paragraph behind;
+  // - "replace": the paragraphs replace the selection;
+  // - "after": a draft at the cursor. The paragraphs go after the paragraph holding the cursor (or replace it when it
+  //   is empty), so they keep their own styles and never merge into the text around the cursor, and the cursor ends
+  //   after the new text.
+  function insertNative(payload, mode) {
+    return host
+      .dynamicCommand(
+        function (input) {
           const doc = Api.GetDocument();
           if (
             !doc ||
@@ -258,15 +282,44 @@
             typeof Api.CreateHyperlink !== "function"
           )
             return { ok: false, unsupported: true };
+          // One real list per <ul>/<ol>; null when this build cannot make one, and the item then starts with its marker.
+          const numberings = {};
+          function numberingFor(list) {
+            if (!(list.id in numberings)) {
+              let level = null;
+              try {
+                const numbering = typeof doc.CreateNumbering === "function" ? doc.CreateNumbering(list.kind) : null;
+                level = numbering && typeof numbering.GetLevel === "function" ? numbering.GetLevel(0) : null;
+              } catch (_) {}
+              numberings[list.id] = level;
+            }
+            return numberings[list.id];
+          }
           const content = [];
           for (let i = 0; i < input.blocks.length; i += 1) {
             const block = input.blocks[i],
               para = Api.CreateParagraph(),
               segments = block.segments;
-            if (block.paragraphStyle && typeof para.SetStyle === "function") {
+            // SetStyle takes a style object, not a name; a name the document lacks leaves the paragraph as it is.
+            if (block.paragraphStyle && typeof doc.GetStyle === "function" && typeof para.SetStyle === "function") {
               try {
-                para.SetStyle(block.paragraphStyle);
+                const style = doc.GetStyle(block.paragraphStyle);
+                if (style) para.SetStyle(style);
               } catch (_) {}
+            }
+            if (block.list) {
+              const level = numberingFor(block.list);
+              let numbered = false;
+              if (level && typeof para.SetNumbering === "function") {
+                try {
+                  numbered = para.SetNumbering(level) !== false;
+                } catch (_) {}
+              }
+              if (!numbered) {
+                const marker = Api.CreateRun();
+                marker.AddText(block.list.marker);
+                para.Push(marker);
+              }
             }
             for (let j = 0; j < segments.length; j += 1) {
               const segment = segments[j],
@@ -291,22 +344,74 @@
             }
             content.push(para);
           }
-          const ok = doc.InsertContent(content, false);
+          let current = null;
+          if (input.mode === "after" && typeof doc.GetCurrentParagraph === "function") {
+            try {
+              current = doc.GetCurrentParagraph();
+            } catch (_) {}
+          }
+          if (current && typeof current.InsertParagraph === "function") {
+            const empty = !String(current.GetText() || "").replace(/[\r\n]+$/, "");
+            let at = current;
+            for (let i = 0; i < content.length; i += 1) {
+              const next = at.InsertParagraph(content[i], "after", true);
+              if (next === false) return { ok: false, error: "Writer text could not be inserted." };
+              at = next || content[i];
+            }
+            if (empty && typeof current.Delete === "function") current.Delete();
+            try {
+              const count = at.GetElementsCount(),
+                last = count ? at.GetElement(count - 1) : null;
+              if (last && typeof last.MoveCursorToPos === "function") last.MoveCursorToPos(last.GetText().length);
+            } catch (_) {}
+            return { ok: true, changed: 1, links: input.linkCount };
+          }
+          const ok = doc.InsertContent(content, input.mode === "inline");
           return { ok: ok !== false, changed: ok === false ? 0 : 1, links: input.linkCount };
-        }, payload)
-        .catch(error => ({ ok: false, error: (error && error.message) || String(error) }));
-      if (result && result.ok && result.links === payload.linkCount) return result;
+        },
+        { blocks: payload.blocks, linkCount: payload.linkCount, mode: mode || "replace" }
+      )
+      .catch(error => ({ ok: false, error: (error && error.message) || String(error) }));
+  }
+  function blockText(block) {
+    return block.segments.map(segment => String(segment.text || "")).join("");
+  }
+  // Paragraphs in a Writer selection, as GetSelectedText returns it (one per line, usually with a final line break).
+  host.paragraphCount = function (text) {
+    const lines = String(text || "")
+      .replace(/\r\n?/g, "\n")
+      .replace(/\n+$/, "")
+      .split("\n");
+    return lines.length === 1 && !lines[0] ? 0 : lines.length;
+  };
+
+  // Puts Guiden's HTML into the document in the way that best keeps the document's own look:
+  // - an edit of several selected paragraphs that returns the same number of plain paragraphs (Improve, Fix,
+  //   Translate) replaces each paragraph's text in place, so headings, fonts and spacing stay as they were;
+  // - anything else without tables (headings, paragraphs, real bullet and numbered lists, links) is built natively in
+  //   the document's formatting, and a draft at the cursor becomes its own paragraphs after the cursor's paragraph;
+  // - tables go through the editor's HTML importer, which sets its own font.
+  host.pasteWriter = async function (html, snapshot) {
+    const payload = G.ui && typeof G.ui.writerNativePayload === "function" ? G.ui.writerNativePayload(html) : null;
+    if (payload && payload.supported && payload.blocks.length) {
+      const selected = snapshot && snapshot.target !== "cursor" ? host.paragraphCount(snapshot.text) : 0;
+      if (selected > 1 && payload.linkCount === 0 && payload.blocks.length === selected) {
+        const replaced = await host.execute("ReplaceTextSmart", [payload.blocks.map(blockText)]).catch(() => false);
+        if (replaced === true) return { ok: true, changed: 1, links: 0, warnings: [] };
+      }
+      const single = payload.blocks.length === 1 && !payload.blocks[0].paragraphStyle;
+      const mode = snapshot && snapshot.target === "cursor" ? "after" : single ? "inline" : "replace";
+      const result = await insertNative(payload, mode);
+      if (result && result.ok && result.links === payload.linkCount)
+        return { ok: true, changed: 1, links: payload.linkCount, warnings: [] };
       if (global.console && console.warn)
-        console.warn(
-          "[Guiden] Native Writer hyperlinks unavailable; using HTML import.",
-          result || { stage: "no-result" }
-        );
+        console.warn("[Guiden] Native Writer insert unavailable; using HTML import.", result || { stage: "no-result" });
       await host.execute("PasteHtml", [String(html || "")]);
       return {
         ok: true,
         changed: 1,
         links: payload.linkCount,
-        warnings: ["Euro-Office used its HTML compatibility importer for document links."]
+        warnings: payload.linkCount ? ["Euro-Office used its HTML compatibility importer for document links."] : []
       };
     }
     await host.execute("PasteHtml", [String(html || "")]);
@@ -329,11 +434,13 @@
       } catch (_) {}
       if (!selected) throw new Error("This Euro-Office build cannot safely select the whole document.");
     }
-    const pasted = await host.pasteWriter(html);
+    const pasted = await host.pasteWriter(html, snapshot);
     return { ok: true, changed: 1, target: snapshot.targetLabel, warnings: pasted.warnings || [] };
   };
+  // Inserts at the cursor, or in place of the selection when there is one.
   host.insertWriter = async function (html) {
-    const pasted = await host.pasteWriter(html);
+    const selected = String((await host.execute("GetSelectedText", [{}]).catch(() => "")) || "").trim();
+    const pasted = await host.pasteWriter(html, { target: selected ? "selection" : "cursor", text: "" });
     return { ok: true, changed: 1, target: "current cursor or selection", warnings: pasted.warnings || [] };
   };
   host.applyCellUpdates = async function (updates, snapshot) {

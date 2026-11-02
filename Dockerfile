@@ -11,3 +11,9 @@ COPY runtime/v1/ \
 
 COPY plugin/cloudcix-guiden/ \
     /var/www/euro-office/documentserver/sdkjs-plugins/cloudcix-guiden/
+
+# The editor's web server sends a file's .gz copy when there is one, so remove any the base image had for the files
+# above; otherwise browsers would keep getting the image's old copies.
+RUN find /var/www/euro-office/documentserver/sdkjs-plugins/v1 \
+         /var/www/euro-office/documentserver/sdkjs-plugins/cloudcix-guiden \
+         -name '*.gz' -delete

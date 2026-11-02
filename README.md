@@ -61,19 +61,38 @@ To build by hand:
 docker build -t guiden-eo .
 ```
 
-Euro-Office lists the plugins it finds when it starts, so new pods show Guiden under Plugins with no editor config
-change.
+Euro-Office lists the plugins it finds when it starts, so new pods show Guiden with no editor config change.
+
+The editor tells browsers to keep plugin files for a year, under a path that changes only with the Euro-Office
+version. After upgrading Guiden on the same Euro-Office version, someone who used the old one may still see it until
+they reload the editor with Ctrl+Shift+R (⌘+Shift+R on a Mac) or clear the site's cached files.
 
 ## Use
 
-1. Open a document, spreadsheet, or presentation in Euro-Office from Nextcloud.
-2. Open **Plugins > CloudCIX Guiden®**.
-3. Enter the CloudCIX API key, unless the editor already provides one (see below).
-4. Select the text/cells/object you want to work with, or leave the current Writer document/current slide active for a broader suggestion.
-5. Choose an editor-specific action, then add an optional instruction.
-6. Click **Generate preview**, review the exact target and changes, then click **Apply changes**.
+Guiden starts with the editor. It adds:
 
-The API key is not stored unless **Remember key on this browser** is checked.
+- a **Guiden** toolbar tab with one-click actions for the editor in use (Improve, Fix, Summarise, Translate, Ask and
+  Company Knowledge in documents; Analyse, Clean up, Formula, Format and Table in spreadsheets; Improve, Shorten,
+  Notes and New slide in presentations);
+- a **Guiden** submenu on the right-click menu, with actions for what is under the cursor: the selected text, the
+  cursor position in a document, the selected cells, or the current slide;
+- the Guiden panel, with a button in the right sidebar. Any action opens it.
+
+Actions such as Improve, Fix and Translate start straight away. Actions that need an instruction (Rewrite, Ask, Draft
+here, Formula and so on) open the panel ready for it; press Ctrl+Enter (⌘+Enter on a Mac) to run and Esc to stop.
+Every change still stops at a preview, and nothing in the file changes until **Apply changes** is clicked.
+
+The first time, the panel asks for a CloudCIX API key, checks it, remembers it in that browser (untick **Remember
+on this browser** to keep it for the session only), and then carries on with the action that was clicked. If CloudCIX
+later turns the key down, the panel asks for a new one the same way. The host can also provide the key (see below),
+and then nobody is asked.
+
+Documents keep their own look: edits replace each paragraph's text in place where they can, so headings, fonts and
+spacing stay; new text takes the document's font and real heading styles, and lists become real bullet and numbered
+lists. A draft at the cursor becomes its own paragraphs after the paragraph holding the cursor, and the cursor ends
+after it. Only tables go through the editor's HTML importer.
+
+The panel follows the editor's light or dark theme, including when it is switched while the editor is open.
 
 ## Provide The Key From The Host
 
@@ -100,7 +119,12 @@ it belongs to, as it is when they type it, so give each person their own key and
 
 ## Notes
 
-- Guiden® registers for Writer, Spreadsheet, and Presentation editors via `EditorsSupport: ["word", "cell", "slide"]`.
+- Guiden® is a background plugin (`config.json` variation `type: "background"`) for Writer, Spreadsheet and
+  Presentation. `background.html` adds the toolbar tab and right-click menu (both defined in `scripts/menus.js`) and
+  opens the panel, `index.html`, as a right-sidebar window. Editor events reach only the background frame, so it passes
+  clicks, selection changes, theme changes and host options to the panel.
+- Editor calls from the panel are made one at a time and time out after 60 seconds, so an answer can never reach the
+  wrong caller and a call the editor never answers cannot block the ones after it.
 - Writer provides explicit read, rewrite, correction, summary, drafting, translation, and document-conversion actions. Mutations show a before/after preview and revalidate the selected text before applying.
 - Writer opens with **Draft New Content** selected by default; users can switch to Ask or another operation from the compact action picker.
 - Cells uses sparse value updates, protected formulas, validated formatting rules, exact destinations, and empty-range checks for new tables and columns. Analysis remains read-only.
@@ -122,7 +146,6 @@ it belongs to, as it is when they type it, so give each person their own key and
 - A request is cancelled if Guiden sends nothing for 60 seconds, so a stalled service never leaves the panel waiting.
 - Very long documents (over 120,000 characters) or selections (over 5,000 cells) are cut for read-only questions, with a notice in the preview, and refused for changes, which would otherwise lose the part that was not sent.
 - Multi-cell results such as a calculated column or a new table are written in one editor command, so one Undo removes all of it.
-- The panel follows the editor's light or dark theme.
 - No Nextcloud config change is required.
 
 ## Tests
@@ -134,7 +157,8 @@ node plugin/cloudcix-guiden/tests/run.js
 ```
 
 The browser suite opens the real panel in Chromium against a fake Writer editor and a fake Guiden API, and checks what
-a person sees: previews, Apply, Copy, Company Knowledge, a provided key and the dark theme. It and the formatting check
+a person sees: the connect card, toolbar and right-click commands arriving from the editor, previews, Apply, Copy,
+Company Knowledge, a provided key and the dark theme. It and the formatting check
 need the development tools in `package.json`:
 
 ```sh

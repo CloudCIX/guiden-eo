@@ -22,6 +22,7 @@ require("../scripts/writer.js");
 require("../scripts/cells.js");
 require("../scripts/slides.js");
 require("../scripts/api.js");
+require("../scripts/menus.js");
 let passed = 0;
 function test(name, fn) {
   try {
@@ -127,10 +128,14 @@ test("Writer paste HTML preserves safe hrefs as native-import anchors", () => {
   assert(!html.includes("target="));
   assert(!html.includes("rel="));
 });
-// The mocked editor records what Guiden asked it to do.
-function mockWriter(withHyperlinks) {
+// The mocked editor records what Guiden asked it to do. options.current is the text of the paragraph holding the
+// cursor (GetCurrentParagraph is missing without it), and options.lists=false leaves out CreateNumbering.
+function mockWriter(withHyperlinks, methodAnswers, options) {
+  options = options || {};
   const calls = [],
-    inserted = [];
+    inserted = [],
+    inline = [],
+    after = [];
   const run = () => ({
     parts: [],
     AddText(t) {
@@ -144,17 +149,40 @@ function mockWriter(withHyperlinks) {
       this.parts.push("\n");
     }
   });
+  // Each paragraph inserted after the cursor's paragraph lands after the one before it, so recording order is enough.
+  function InsertParagraph(para, position, returnNew) {
+    after.push(para);
+    return returnNew ? para : true;
+  }
+  const current = {
+    deleted: false,
+    GetText: () => options.current,
+    InsertParagraph,
+    Delete() {
+      this.deleted = true;
+      return true;
+    }
+  };
+  const doc = {
+    InsertContent(content, isInline) {
+      inserted.push(...content);
+      inline.push(isInline);
+      return true;
+    },
+    GetStyle: name => ({ name })
+  };
+  if (options.current !== undefined) doc.GetCurrentParagraph = () => current;
+  if (options.lists !== false) doc.CreateNumbering = kind => ({ GetLevel: level => ({ kind, level }) });
   global.Api = {
-    GetDocument: () => ({
-      InsertContent(content) {
-        inserted.push(...content);
-        return true;
-      }
-    }),
+    GetDocument: () => doc,
     CreateParagraph: () => ({
       items: [],
+      InsertParagraph,
       SetStyle(style) {
-        this.style = style;
+        this.style = style.name;
+      },
+      SetNumbering(level) {
+        this.numbering = level;
       },
       Push(x) {
         this.items.push(x);
@@ -169,16 +197,20 @@ function mockWriter(withHyperlinks) {
   const executeMethod = global.Asc.plugin.executeMethod;
   global.Asc.plugin.executeMethod = (name, args, callback) => {
     calls.push([name, args]);
-    callback(undefined);
+    callback((methodAnswers || {})[name]);
   };
   return {
     calls,
     inserted,
+    inline,
+    after,
+    current,
     restore() {
       global.Asc.plugin.executeMethod = executeMethod;
     }
   };
 }
+const text = para => para.items.map(item => (item.parts ? item.parts.join("") : item.text)).join("");
 // writerNativePayload parses HTML with the browser's DOM, so it is covered by tests/browser.js; here it is stubbed.
 function withPayload(payload, fn) {
   const ui = global.Guiden.ui;
@@ -895,6 +927,327 @@ queue("a stream that goes quiet times out, and Stop is still reported as Stop", 
     global.fetch = originalFetch;
     api.idleMs = idle;
   }
+});
+
+const plain = text => ({ paragraphStyle: "", segments: [{ text }] });
+queue("an edit of several selected paragraphs keeps each paragraph's own formatting", async () => {
+  const editor = mockWriter(true, { ReplaceTextSmart: true });
+  try {
+    const payload = { supported: true, linkCount: 0, blocks: [plain("Un."), plain("Deux.")] };
+    const snapshot = { target: "selection", text: "One.\r\nTwo.\r\n" };
+    await withPayload(payload, () => global.Guiden.host.pasteWriter("<p>Un.</p><p>Deux.</p>", snapshot));
+    assert.deepStrictEqual(editor.calls, [["ReplaceTextSmart", [["Un.", "Deux."]]]]);
+    assert.strictEqual(editor.inserted.length, 0);
+  } finally {
+    editor.restore();
+  }
+});
+queue("one new paragraph goes into the edited paragraph, in the document's formatting", async () => {
+  const editor = mockWriter(true);
+  try {
+    const payload = { supported: true, linkCount: 0, blocks: [plain("Shorter.")] };
+    const snapshot = { target: "selection", text: "One.\r\nTwo.\r\n" };
+    await withPayload(payload, () => global.Guiden.host.pasteWriter("<p>Shorter.</p>", snapshot));
+    assert.deepStrictEqual(editor.calls, [], "neither ReplaceTextSmart nor the HTML importer");
+    assert.deepStrictEqual(editor.inline, [true]);
+  } finally {
+    editor.restore();
+  }
+});
+queue("a draft at the cursor becomes its own paragraphs after the cursor's paragraph, with their styles", async () => {
+  const editor = mockWriter(true, {}, { current: "Some text.\r\n" });
+  try {
+    const payload = {
+      supported: true,
+      linkCount: 0,
+      blocks: [{ paragraphStyle: "Heading 2", segments: [{ text: "Next steps" }] }, plain("We ship in Q3.")]
+    };
+    await withPayload(payload, () => global.Guiden.host.pasteWriter("<h2>…</h2><p>…</p>", { target: "cursor" }));
+    assert.deepStrictEqual(editor.calls, [], "no HTML importer");
+    assert.strictEqual(editor.inserted.length, 0, "nothing merged into the text around the cursor");
+    assert.deepStrictEqual(editor.after.map(text), ["Next steps", "We ship in Q3."]);
+    assert.strictEqual(editor.after[0].style, "Heading 2");
+    assert.strictEqual(editor.current.deleted, false, "the paragraph with text stays");
+  } finally {
+    editor.restore();
+  }
+});
+queue("a draft in an empty paragraph takes that paragraph's place", async () => {
+  const editor = mockWriter(true, {}, { current: "\r\n" });
+  try {
+    const payload = { supported: true, linkCount: 0, blocks: [plain("One line.")] };
+    await withPayload(payload, () => global.Guiden.host.pasteWriter("<p>One line.</p>", { target: "cursor" }));
+    assert.deepStrictEqual(editor.after.map(text), ["One line."]);
+    assert.strictEqual(editor.current.deleted, true);
+  } finally {
+    editor.restore();
+  }
+});
+queue("an answer inserted with nothing selected goes after the cursor's paragraph", async () => {
+  const editor = mockWriter(true, { GetSelectedText: "" }, { current: "Intro.\r\n" });
+  try {
+    const payload = { supported: true, linkCount: 0, blocks: [plain("The answer.")] };
+    await withPayload(payload, () => global.Guiden.host.insertWriter("<p>The answer.</p>"));
+    assert.deepStrictEqual(editor.after.map(text), ["The answer."]);
+    assert.strictEqual(editor.inserted.length, 0);
+  } finally {
+    editor.restore();
+  }
+});
+const item = (words, kind, id, marker) => ({
+  paragraphStyle: "List Paragraph",
+  segments: [{ text: words }],
+  list: { kind, id, marker }
+});
+const listPayload = {
+  supported: true,
+  linkCount: 0,
+  blocks: [item("Apples", "bullet", 1, "• "), item("Pears", "bullet", 1, "• "), item("Step", "numbered", 2, "1. ")]
+};
+queue("lists become real bullet and numbered lists in the document's formatting", async () => {
+  const editor = mockWriter(true);
+  try {
+    await withPayload(listPayload, () =>
+      global.Guiden.host.pasteWriter("<ul>…</ul><ol>…</ol>", { target: "selection", text: "x" })
+    );
+    assert.deepStrictEqual(editor.calls, [], "no HTML importer");
+    assert.deepStrictEqual(editor.inserted.map(text), ["Apples", "Pears", "Step"], "no typed bullet characters");
+    assert.deepStrictEqual(
+      editor.inserted.map(para => para.numbering),
+      [
+        { kind: "bullet", level: 0 },
+        { kind: "bullet", level: 0 },
+        { kind: "numbered", level: 0 }
+      ]
+    );
+    assert.strictEqual(editor.inserted[0].numbering, editor.inserted[1].numbering, "one list per <ul>");
+    assert.strictEqual(editor.inserted[0].style, "List Paragraph");
+  } finally {
+    editor.restore();
+  }
+});
+queue("without real lists, list items start with a bullet or number", async () => {
+  const editor = mockWriter(true, {}, { lists: false });
+  try {
+    await withPayload(listPayload, () =>
+      global.Guiden.host.pasteWriter("<ul>…</ul><ol>…</ol>", { target: "selection", text: "x" })
+    );
+    assert.deepStrictEqual(editor.inserted.map(text), ["• Apples", "• Pears", "1. Step"]);
+  } finally {
+    editor.restore();
+  }
+});
+queue("tables still go through the HTML importer", async () => {
+  const editor = mockWriter(true);
+  try {
+    const html = "<table><tr><td>1</td></tr></table>";
+    await withPayload({ supported: false, linkCount: 0, blocks: [] }, () =>
+      global.Guiden.host.pasteWriter(html, { target: "selection", text: "x" })
+    );
+    assert.deepStrictEqual(editor.calls, [["PasteHtml", [html]]]);
+  } finally {
+    editor.restore();
+  }
+});
+test("paragraphs in a selection are counted the way GetSelectedText returns them", () => {
+  const count = global.Guiden.host.paragraphCount;
+  assert.strictEqual(count("One.\r\nTwo.\r\n"), 2);
+  assert.strictEqual(count("Part of a sentence"), 1);
+  assert.strictEqual(count(""), 0);
+});
+queue("editor calls never overlap, so answers can't reach the wrong caller", async () => {
+  const executeMethod = global.Asc.plugin.executeMethod;
+  let active = 0,
+    most = 0;
+  global.Asc.plugin.executeMethod = (name, args, callback) => {
+    active += 1;
+    most = Math.max(most, active);
+    setTimeout(() => {
+      active -= 1;
+      callback(name);
+    }, 5);
+  };
+  try {
+    const answers = await Promise.all(["A", "B", "C"].map(name => global.Guiden.host.execute(name, [])));
+    assert.deepStrictEqual(answers, ["A", "B", "C"]);
+    assert.strictEqual(most, 1);
+  } finally {
+    global.Asc.plugin.executeMethod = executeMethod;
+  }
+});
+queue("an editor call that never answers fails instead of blocking the ones after it", async () => {
+  const executeMethod = global.Asc.plugin.executeMethod,
+    host = global.Guiden.host,
+    timeout = host.callTimeoutMs;
+  host.callTimeoutMs = 20;
+  global.Asc.plugin.executeMethod = (name, args, callback) => {
+    if (name === "Answered") callback("ok");
+  };
+  try {
+    await assert.rejects(host.execute("Lost", []), /did not answer/);
+    assert.strictEqual(await host.execute("Answered", []), "ok");
+  } finally {
+    global.Asc.plugin.executeMethod = executeMethod;
+    host.callTimeoutMs = timeout;
+  }
+});
+queue("Cells reads the selection as a target every Cells action accepts", async () => {
+  const range = {
+    GetAddress: () => "$A$1:$B$2",
+    GetValue: () => [
+      ["Region", "Q1"],
+      ["north", 120]
+    ],
+    // Like the editor, GetFormula returns plain values too.
+    GetFormula: () => [
+      ["Region", "Q1"],
+      ["north", "=B1*2"]
+    ],
+    GetRowsCount: () => 2,
+    GetColumnsCount: () => 2
+  };
+  global.Api = { GetActiveSheet: () => ({ GetName: () => "Sales", GetSelection: () => range }) };
+  const snapshot = await global.Guiden.host.readCells("cells.edit");
+  assert.strictEqual(snapshot.target, "selection");
+  assert.strictEqual(snapshot.address, "A1:B2");
+  assert.deepStrictEqual(snapshot.formulas, [
+    ["", ""],
+    ["", "=B1*2"]
+  ]);
+  Object.values(global.Guiden.actions)
+    .filter(action => action.editor === "cell")
+    .forEach(action => assert(action.supportedTargets.includes(snapshot.target), action.id));
+  const updates = C.validateUpdates([{ row: 1, column: 0, before: "north", after: "North" }], snapshot);
+  assert.strictEqual(updates[0].after, "North", "a plain value can be cleaned");
+  assert.throws(() => C.validateUpdates([{ row: 1, column: 1, before: 120, after: 1 }], snapshot), /replace a formula/);
+});
+
+const M = global.Guiden.menus;
+test("every toolbar and right-click command opens an action of its own editor", () => {
+  const ids = [];
+  const collect = items =>
+    items.forEach(item => {
+      if (item.items) collect(item.items);
+      else ids.push(item.id);
+    });
+  ["word", "cell", "slide"].forEach(editor => {
+    collect(M.toolbar(editor)[0].items);
+    ["Selection", "Target"].forEach(type => collect(M.contextMenu(editor, type)));
+    ids.forEach(id => {
+      const command = M.commandFor(id);
+      assert(command, "unknown command " + id);
+      if (command.open) return;
+      const action = global.Guiden.actions[command.actionId];
+      if (command.actionId.startsWith("knowledge.")) return; // registered by the panel (app.js)
+      assert(action, id + " -> " + command.actionId);
+      assert.strictEqual(action.editor, editor, id);
+    });
+    ids.length = 0;
+  });
+});
+test("the right-click menu fits what was clicked", () => {
+  const labels = (editor, type) => {
+    const menu = M.contextMenu(editor, type);
+    return menu.length ? menu[0].items.map(item => item.text) : [];
+  };
+  assert.deepStrictEqual(labels("word", "Selection").slice(0, 4), [
+    "Improve writing",
+    "Fix spelling & grammar",
+    "Summarise selection",
+    "Translate"
+  ]);
+  assert.deepStrictEqual(labels("word", "Target"), ["Draft here…", "Ask about this document…", "Open Guiden"]);
+  assert.deepStrictEqual(labels("word", "Image"), [], "nothing for an image");
+  assert(labels("cell", "Selection").includes("Clean up values"));
+  assert(labels("slide", "Selection").includes("Improve text"));
+  const french = M.commandFor("word.translate.French");
+  assert.deepStrictEqual(french, {
+    actionId: "writer.rewrite",
+    run: true,
+    instruction: "Translate into French. Keep the meaning, names, numbers, links and formatting."
+  });
+  assert.deepStrictEqual(M.commandFor("guiden.open"), { open: true });
+  assert.strictEqual(M.commandFor("not.a.command"), null);
+});
+
+// background.js runs in the editor's background frame; this stands in for the runtime around it.
+function loadBackground(editorType) {
+  const calls = [],
+    windows = [];
+  function PluginWindow() {
+    this.events = {};
+    this.sent = [];
+    windows.push(this);
+  }
+  PluginWindow.prototype.show = function (variation) {
+    this.variation = variation;
+  };
+  PluginWindow.prototype.activate = function () {
+    this.activated = (this.activated || 0) + 1;
+  };
+  PluginWindow.prototype.command = function (name, data) {
+    this.sent.push([name, data]);
+  };
+  PluginWindow.prototype.attachEvent = function (name, fn) {
+    this.events[name] = fn;
+  };
+  const saved = global.Asc;
+  global.Asc = {
+    PluginWindow,
+    plugin: {
+      guid: "asc.{guiden}",
+      info: { editorType },
+      executeMethod: (name, args) => calls.push([name, args[0]]),
+      attachEditorEvent: name => calls.push(["attach", name])
+    }
+  };
+  delete require.cache[require.resolve("../scripts/background.js")];
+  require("../scripts/background.js");
+  const plugin = global.Asc.plugin;
+  global.Asc = saved;
+  plugin.init();
+  return { plugin, calls, windows };
+}
+test("in the background, Guiden adds its tab and a closed side panel when the editor starts", () => {
+  const bg = loadBackground("word");
+  const toolbar = bg.calls.find(call => call[0] === "AddToolbarMenuItem");
+  assert.strictEqual(toolbar[1].guid, "asc.{guiden}");
+  assert.strictEqual(toolbar[1].tabs[0].text, "Guiden");
+  assert.strictEqual(bg.windows.length, 1);
+  assert.strictEqual(bg.windows[0].variation.type, "panelRight");
+  assert.strictEqual(bg.windows[0].variation.isActivated, false);
+  assert(bg.calls.some(call => call[0] === "attach" && call[1] === "onSelectionChanged"));
+});
+test("a menu click opens the panel and the command waits until the panel is ready", () => {
+  const bg = loadBackground("word"),
+    panel = bg.windows[0];
+  bg.plugin.event_onContextMenuClick("word.translate.French");
+  assert.strictEqual(panel.activated, 1);
+  assert.deepStrictEqual(panel.sent, [], "nothing is sent before the panel has loaded");
+  panel.events.guidenReady();
+  assert.strictEqual(panel.sent[0][0], "guidenRun");
+  assert.strictEqual(panel.sent[0][1].actionId, "writer.rewrite");
+  bg.plugin.event_onToolbarMenuClick("word.improve");
+  assert.strictEqual(panel.sent[1][1].actionId, "writer.improve");
+  bg.plugin.event_onToolbarMenuClick("guiden.open");
+  assert.strictEqual(panel.sent.length, 2, "Open only opens the panel");
+  assert.strictEqual(panel.activated, 3);
+});
+test("the background always answers a right-click, even with nothing to add", () => {
+  const bg = loadBackground("word");
+  bg.plugin.event_onContextMenuShow({ type: "Image" });
+  bg.plugin.event_onContextMenuShow({ type: "Selection" });
+  const answers = bg.calls.filter(call => call[0] === "AddContextMenuItem");
+  assert.strictEqual(answers.length, 2);
+  assert.deepStrictEqual(answers[0][1].items, []);
+  assert.strictEqual(answers[1][1].items[0].text, "Guiden");
+});
+test("the background passes theme changes to the panel", () => {
+  const bg = loadBackground("cell"),
+    panel = bg.windows[0];
+  panel.events.guidenReady();
+  bg.plugin.onThemeChanged({ type: "dark", name: "theme-dark", "background-normal": "#333" });
+  assert.deepStrictEqual(panel.sent.pop(), ["guidenTheme", { type: "dark", name: "theme-dark" }]);
 });
 queued
   .reduce((chain, [name, fn]) => chain.then(() => test(name, fn)), Promise.resolve())
