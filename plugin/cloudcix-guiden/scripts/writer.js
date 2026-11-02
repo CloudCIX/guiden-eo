@@ -97,14 +97,15 @@
         (draft
           ? "Drafting at an empty cursor is normal: create new content from the instruction and any supplied Guiden retrieval context. Do not require existing document text. " +
             "When the rest of the document is supplied, the new content must fit its subject, terms, and style; do not repeat or rewrite it. "
-          : "Preserve the facts, names, numbers, meaning, tense, and existing links, and change the wording, tone, and sentence structure as much as the instruction asks. " +
+          : "Preserve the facts, names, numbers, meaning, tense, how strong each claim is, and existing links, and change the wording, tone, and sentence structure as much as the instruction asks. " +
             "Keep one paragraph for each source paragraph unless the instruction asks for a different structure. ") +
         'For a valid result return JSON only: {"status":"ready","replacementHtml":"safe document HTML"}. ' +
         'If facts the request depends on are genuinely missing, return {"status":"needs_input","message":"a specific explanation of what is needed"}; never put a refusal or explanation in replacementHtml. ' +
         "Use only facts from the instruction, the document, and supplied retrieval context, and use each fact only for what it is. " +
         "Never make up quotes, people, dates, places (including the city in a press release dateline), prices, figures, contact details, sign-in or access details, or facts about real companies, products, or laws. " +
         "Facts in retrieval context about one product or service do not apply to another unless the context says so. " +
-        "Where the format calls for a detail you were not given, such as a spokesperson quote or a media contact, write a short placeholder in square brackets, such as [Spokesperson quote]. " +
+        "Where the format calls for a detail you were not given, write a short placeholder in square brackets instead: a press release dateline starts with [City] unless the user named a place, a quote is [Spokesperson quote] with no quoted words, and a contact is [Media contact]. " +
+        "Use dates and terms exactly as given; a launch on a given date is not available immediately. " +
         "Allowed HTML: h1,h2,h3,p,strong,em,a,ul,ol,li,blockquote,table,thead,tbody,tr,th,td,br. Put every paragraph in its own <p>, even when there is only one. " +
         "Use only hyperlinks already present in source HTML or supplied retrieval context; never invent or repair a URL.";
     const context =

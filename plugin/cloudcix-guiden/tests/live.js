@@ -86,6 +86,8 @@ function blocks(html) {
 }
 // -ize spellings such as "prioritize"; Guiden is asked for Irish English, which spells them "prioritise".
 const AMERICAN = /\b\w{3,}iz(?:e|es|ed|ing|ation)\b/i;
+// The source says what "we will" do next quarter; an edit that keeps the meaning keeps the future tense.
+const FUTURE = /\bwill\b|['’]ll\b/i;
 function words(text) {
   return String(text || "")
     .replace(/<[^>]+>/g, " ")
@@ -132,6 +134,7 @@ const cases = [
     check(result) {
       assert(!result.needsInput, "asked for input: " + result.message);
       assert.strictEqual(blocks(result.replacementHtml), 1, "not one paragraph: " + result.replacementHtml);
+      assert(FUTURE.test(C.htmlText(result.replacementHtml)), "changed the tense: " + result.replacementHtml);
       return { words: words(result.replacementHtml) };
     },
     checkFollowUp(result, first) {
@@ -153,6 +156,13 @@ const cases = [
       assert(blocks(result.replacementHtml) >= 1, "empty");
       // "a lot of" and "happy" are casual; a more formal rewrite replaces them rather than only fixing the grammar.
       assert(!/\ba ?lot of\b|\bhappy\b/i.test(result.replacementHtml), "still casual: " + result.replacementHtml);
+      // The source says "good progress"; a tone change should not turn it into a bigger claim.
+      assert(
+        !/\b(?:significant|substantial|excellent|remarkable|outstanding|considerable|major|great|strong) progress/i.test(
+          result.replacementHtml
+        ),
+        "overstated the progress: " + result.replacementHtml
+      );
       return { html: result.replacementHtml };
     }
   },
@@ -233,6 +243,7 @@ const cases = [
       assert(!/[“"][^”"]{15,}[”"],?\s+(?:said|says|added)\b/i.test(text), "made up a quote");
       assert(!/\b(?:Dublin|Cork|Galway|Limerick)\b/.test(text), "made up a dateline city");
       assert(!/credentials|log ?in with|sign ?in with/i.test(text), "made up how people sign in");
+      assert(!/\bimmediately\b/i.test(text), "said available immediately, but it launches on 1 December");
       return { words: words(result.replacementHtml), placeholders: text.match(/\[[^\]]{3,60}\]/g) || [] };
     }
   },
@@ -334,7 +345,12 @@ async function ask(action, snapshot, messages) {
     raw,
     retried,
     ms: Date.now() - started,
-    retrieval: { used: Boolean(metadata.retrievalUsed), sources: metadata.sources || [] }
+    // available is false when the server sent no retrieval metadata at all, which is different from "not used".
+    retrieval: {
+      available: Boolean(metadata.available),
+      used: Boolean(metadata.retrievalUsed),
+      sources: metadata.sources || []
+    }
   };
 }
 
