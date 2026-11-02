@@ -50,6 +50,139 @@
     return { ok: true, changed: changed };
   }
 
+  // Runs inside the editor as well as in the panel: the smallest word-level edits that turn before into after, as
+  // [start, end, text] spans of before (replace before.slice(start, end) with text), in order. A single space between
+  // two changes joins them, so a rewritten phrase reads as one change. null when the texts are too long to compare.
+  function wordEdits(before, after) {
+    const a = String(before).match(/\s+|[^\s]+/g) || [],
+      b = String(after).match(/\s+|[^\s]+/g) || [];
+    if ((a.length + 1) * (b.length + 1) > 400000) return null;
+    const n = a.length,
+      m = b.length,
+      width = m + 1,
+      common = new Uint32Array((n + 1) * width);
+    for (let i = n - 1; i >= 0; i -= 1)
+      for (let j = m - 1; j >= 0; j -= 1)
+        common[i * width + j] =
+          a[i] === b[j]
+            ? common[(i + 1) * width + j + 1] + 1
+            : Math.max(common[(i + 1) * width + j], common[i * width + j + 1]);
+    const steps = [];
+    let i = 0,
+      j = 0;
+    while (i < n || j < m) {
+      if (i < n && j < m && a[i] === b[j]) {
+        steps.push(["=", a[i]]);
+        i += 1;
+        j += 1;
+      } else if (j < m && (i === n || common[i * width + j + 1] >= common[(i + 1) * width + j])) {
+        steps.push(["+", b[j]]);
+        j += 1;
+      } else {
+        steps.push(["-", a[i]]);
+        i += 1;
+      }
+    }
+    const edits = [];
+    let offset = 0,
+      current = null;
+    for (let k = 0; k < steps.length; k += 1) {
+      const kind = steps[k][0],
+        token = steps[k][1];
+      const joins = kind === "=" && current && /^\s+$/.test(token) && k + 1 < steps.length && steps[k + 1][0] !== "=";
+      if (kind === "=" && !joins) {
+        if (current) edits.push([current.start, current.end, current.text]);
+        current = null;
+        offset += token.length;
+        continue;
+      }
+      if (!current) current = { start: offset, end: offset, text: "" };
+      if (kind !== "+") {
+        offset += token.length;
+        current.end = offset;
+      }
+      if (kind !== "-") current.text += token;
+    }
+    if (current) edits.push([current.start, current.end, current.text]);
+    return edits;
+  }
+  host.wordEdits = wordEdits;
+  host.trackedEdits = trackedEdits;
+
+  // Runs inside the editor: makes the selection read input.after, one line per selected paragraph, as word-level
+  // edits. Used with Track changes on, so each edit shows as a deletion and an insertion someone can accept or reject.
+  // Nothing changes unless every paragraph still reads as input.before.
+  function trackedEdits(input) {
+    const doc = Api.GetDocument();
+    if (!doc || typeof doc.GetRangeBySelect !== "function" || typeof doc.IsTrackRevisions !== "function")
+      return { ok: false, unsupported: true };
+    if (!doc.IsTrackRevisions()) return { ok: false, error: "Track changes is off." };
+    const range = doc.GetRangeBySelect(),
+      lines = input.before,
+      at = [],
+      plans = [];
+    if (!range || typeof range.GetRange !== "function") return { ok: false, unsupported: true };
+    function strip(text) {
+      return String(text || "").replace(/[\r\n]+$/, "");
+    }
+    if (lines.length === 1) {
+      if (strip(range.GetText()) !== lines[0]) return { ok: false, error: "The selection changed." };
+      at.push(function (start, end) {
+        return range.GetRange(start, end);
+      });
+    } else {
+      const paragraphs = typeof range.GetAllParagraphs === "function" ? range.GetAllParagraphs() : [];
+      if (paragraphs.length !== lines.length) return { ok: false, error: "The selection changed." };
+      for (let i = 0; i < lines.length; i += 1) {
+        const paragraph = paragraphs[i],
+          text = strip(paragraph.GetText()),
+          offset = i === 0 ? text.length - lines[i].length : 0;
+        if (offset < 0 || text.substr(offset, lines[i].length) !== lines[i])
+          return { ok: false, error: "The selection changed." };
+        at.push(function (start, end) {
+          return paragraph.GetRange(offset + start, offset + end);
+        });
+      }
+    }
+    for (let i = 0; i < lines.length; i += 1) {
+      const edits = wordEdits(lines[i], input.after[i]);
+      if (!edits) return { ok: false, error: "The text is too long to compare." };
+      plans.push(edits);
+    }
+    // Editor positions are not character offsets: each run starts with an empty position. So map every character to
+    // its position first, then edit from the end backwards, deleting the old words and then adding the new ones after
+    // the character in front of them. Each step changes only positions after the ones it uses.
+    const maps = [];
+    for (let i = 0; i < lines.length; i += 1) {
+      const map = [];
+      let position = 0;
+      while (map.length < lines[i].length && position < lines[i].length * 3 + 50) {
+        const piece = at[i](position, position + 1),
+          text = piece ? String(piece.GetText() || "") : "";
+        for (let c = 0; c < text.length; c += 1) map.push(position);
+        position += 1;
+      }
+      if (map.length !== lines[i].length) return { ok: false, error: "The selection could not be measured." };
+      maps.push(map);
+    }
+    let changed = 0;
+    for (let i = plans.length - 1; i >= 0; i -= 1)
+      for (let k = plans[i].length - 1; k >= 0; k -= 1) {
+        const start = plans[i][k][0],
+          end = plans[i][k][1],
+          text = plans[i][k][2],
+          map = maps[i];
+        if (end > start) at[i](map[start], map[end - 1] + 1).Delete();
+        if (text) {
+          if (start > 0) at[i](map[start - 1], map[start - 1] + 1).AddText(text, "after");
+          else if (map.length) at[i](map[0], map[0] + 1).AddText(text, "before");
+          else return { ok: false, error: "An empty paragraph cannot be edited this way." };
+        }
+        changed += 1;
+      }
+    return { ok: true, changed: changed };
+  }
+
   // One editor call at a time. The panel's calls travel through the background frame and their answers are matched
   // to callers in order, and the runtime keeps a single callback for commands, so overlapping calls can get each
   // other's answers. A call the editor never answers fails after callTimeoutMs instead of holding the queue.
@@ -112,6 +245,23 @@
       })
       .catch(() => "word");
   };
+  const documentText = function () {
+    const doc = Api.GetDocument(),
+      options = {
+        Numbering: true,
+        Math: true,
+        TableCellSeparator: "\t",
+        TableRowSeparator: "\n",
+        ParaSeparator: "\n\n",
+        NewLineSeparator: "\n"
+      };
+    if (doc && typeof doc.GetText === "function") return doc.GetText(options) || "";
+    const out = [],
+      paragraphs = doc && doc.GetAllParagraphs ? doc.GetAllParagraphs() : [];
+    for (let i = 0; i < paragraphs.length; i += 1)
+      if (paragraphs[i] && paragraphs[i].GetText) out.push(paragraphs[i].GetText(options) || "");
+    return out.join("\n\n");
+  };
   host.readWriter = async function (actionId) {
     let selected = await host.execute("GetSelectedText", [{}]).catch(() => "");
     selected = selected || "";
@@ -119,26 +269,13 @@
     const insertsAtCursor = actionId === "writer.draft";
     let target = selected.trim() ? "selection" : insertsAtCursor ? "cursor" : "full_document",
       text = selected;
-    if (target === "full_document")
-      text = await host
-        .command(function () {
-          const doc = Api.GetDocument(),
-            options = {
-              Numbering: true,
-              Math: true,
-              TableCellSeparator: "\t",
-              TableRowSeparator: "\n",
-              ParaSeparator: "\n\n",
-              NewLineSeparator: "\n"
-            };
-          if (doc && typeof doc.GetText === "function") return doc.GetText(options) || "";
-          const out = [],
-            paragraphs = doc && doc.GetAllParagraphs ? doc.GetAllParagraphs() : [];
-          for (let i = 0; i < paragraphs.length; i += 1)
-            if (paragraphs[i] && paragraphs[i].GetText) out.push(paragraphs[i].GetText(options) || "");
-          return out.join("\n\n");
-        })
-        .catch(() => "");
+    if (target === "full_document") text = await host.command(documentText).catch(() => "");
+    // A draft at the cursor reads the document too, so new content fits its subject and wording. It is context only:
+    // it is not part of the fingerprint, so typing elsewhere in the document does not block adding the draft.
+    const context =
+      target === "cursor"
+        ? String((await host.command(documentText).catch(() => "")) || "").slice(0, C.contextLimits.draftContextChars)
+        : "";
     const source = { target, text: text || "", html: selectedHtml || "" };
     return {
       editor: "word",
@@ -146,6 +283,7 @@
       target,
       targetLabel: target === "selection" ? "Selected text" : target === "cursor" ? "Current cursor" : "Whole document",
       text: source.text,
+      contextText: context.trim() ? context : "",
       sourceHtml: source.html,
       words: C.wordCount(source.text),
       fingerprint: C.fingerprint(source)
@@ -338,6 +476,8 @@
                 if (parts[k]) run.AddText(parts[k]);
                 if (segment.bold && typeof run.SetBold === "function") run.SetBold(true);
                 if (segment.italic && typeof run.SetItalic === "function") run.SetItalic(true);
+                // A [placeholder] Guiden could not fill in is highlighted, so it is easy to find and replace.
+                if (segment.highlight && parts[k] && typeof run.SetHighlight === "function") run.SetHighlight("yellow");
                 if (k < parts.length - 1 && typeof run.AddLineBreak === "function") run.AddLineBreak();
                 if (para.Push(run) === false) return { ok: false, error: "Writer text could not be inserted." };
               }
@@ -377,12 +517,15 @@
     return block.segments.map(segment => String(segment.text || "")).join("");
   }
   // Paragraphs in a Writer selection, as GetSelectedText returns it (one per line, usually with a final line break).
-  host.paragraphCount = function (text) {
-    const lines = String(text || "")
+  function lines(text) {
+    const all = String(text || "")
       .replace(/\r\n?/g, "\n")
       .replace(/\n+$/, "")
       .split("\n");
-    return lines.length === 1 && !lines[0] ? 0 : lines.length;
+    return all.length === 1 && !all[0] ? [] : all;
+  }
+  host.paragraphCount = function (text) {
+    return lines(text).length;
   };
 
   // Puts Guiden's HTML into the document in the way that best keeps the document's own look:
@@ -391,11 +534,23 @@
   // - anything else without tables (headings, paragraphs, real bullet and numbered lists, links) is built natively in
   //   the document's formatting, and a draft at the cursor becomes its own paragraphs after the cursor's paragraph;
   // - tables go through the editor's HTML importer, which sets its own font.
-  host.pasteWriter = async function (html, snapshot) {
+  // With tracked=true (Track changes is on), an edit that keeps the paragraphs as they are is made as word-level
+  // tracked edits, so reviewers see only the words that changed; anything else shows as the old text deleted and the
+  // new text inserted.
+  host.pasteWriter = async function (html, snapshot, tracked) {
     const payload = G.ui && typeof G.ui.writerNativePayload === "function" ? G.ui.writerNativePayload(html) : null;
     if (payload && payload.supported && payload.blocks.length) {
       const selected = snapshot && snapshot.target !== "cursor" ? host.paragraphCount(snapshot.text) : 0;
-      if (selected > 1 && payload.linkCount === 0 && payload.blocks.length === selected) {
+      const sameShape = selected > 0 && payload.linkCount === 0 && payload.blocks.length === selected;
+      if (tracked && sameShape) {
+        const before = lines(snapshot.text).slice(0, selected);
+        const edited = await host
+          .dynamicCommand(trackedEdits, { before, after: payload.blocks.map(blockText) }, [wordEdits])
+          .catch(error => ({ ok: false, error: error && error.message }));
+        if (edited && edited.ok) return { ok: true, changed: 1, links: 0, warnings: [], tracked: true };
+        if (global.console && console.warn) console.warn("[Guiden] Word-level tracked edit unavailable.", edited);
+      }
+      if (!tracked && selected > 1 && sameShape) {
         const replaced = await host.execute("ReplaceTextSmart", [payload.blocks.map(blockText)]).catch(() => false);
         if (replaced === true) return { ok: true, changed: 1, links: 0, warnings: [] };
       }
@@ -424,7 +579,7 @@
       .replace(/\s+(?:target|rel)="[^"]*"/gi, "");
     return '<!doctype html><html><head><meta charset="utf-8"></head><body>' + body + "</body></html>";
   };
-  host.applyWriter = async function (html, snapshot) {
+  host.applyWriter = async function (html, snapshot, options) {
     if (snapshot.target === "full_document" && snapshot.text.trim()) {
       let selected = false;
       try {
@@ -434,10 +589,76 @@
       } catch (_) {}
       if (!selected) throw new Error("This Euro-Office build cannot safely select the whole document.");
     }
-    const pasted = await host.pasteWriter(html, snapshot);
-    return { ok: true, changed: 1, target: snapshot.targetLabel, warnings: pasted.warnings || [] };
+    const tracking = await host.trackChanges(Boolean(options && options.track));
+    let pasted;
+    try {
+      pasted = await host.pasteWriter(html, snapshot, tracking.on);
+    } finally {
+      if (tracking.turnedOn) await host.trackChanges(false, true);
+    }
+    return {
+      ok: true,
+      changed: 1,
+      target: snapshot.targetLabel,
+      tracked: tracking.on,
+      warnings: pasted.warnings || []
+    };
+  };
+  // Whether Track changes is on, after turning it on when on=true. turnedOn says this call switched it on, so the
+  // caller can switch it back off with force=true; Guiden never turns off tracking someone else turned on.
+  host.trackChanges = async function (on, force) {
+    const result = await host
+      .dynamicCommand(
+        function (input) {
+          const doc = Api.GetDocument();
+          if (!doc || typeof doc.IsTrackRevisions !== "function" || typeof doc.SetTrackRevisions !== "function")
+            return { supported: false, on: false, turnedOn: false };
+          const was = Boolean(doc.IsTrackRevisions());
+          if (input.force) doc.SetTrackRevisions(input.on);
+          else if (input.on && !was) doc.SetTrackRevisions(true);
+          const now = Boolean(doc.IsTrackRevisions());
+          return { supported: true, on: now, turnedOn: !was && now };
+        },
+        { on: Boolean(on), force: Boolean(force) }
+      )
+      .catch(() => null);
+    return result || { supported: false, on: false, turnedOn: false };
   };
   // Inserts at the cursor, or in place of the selection when there is one.
+  // Adds each comment to the first unused place its quote appears, inside the selection when there is one. Comments
+  // whose text has gone are skipped and counted.
+  host.addComments = async function (comments, snapshot) {
+    const result = await host.dynamicCommand(
+      function (input) {
+        const doc = Api.GetDocument();
+        if (!doc || typeof doc.Search !== "function") return { ok: false, error: "Comments are not supported here." };
+        let scope = doc;
+        if (input.selection && typeof doc.GetRangeBySelect === "function") {
+          const range = doc.GetRangeBySelect();
+          if (range && typeof range.Search === "function") scope = range;
+        }
+        const used = {};
+        let added = 0,
+          missing = 0;
+        for (let i = 0; i < input.comments.length; i += 1) {
+          const item = input.comments[i],
+            found = scope.Search(item.quote, true) || [],
+            index = used[item.quote] || 0,
+            range = found[index] || found[0];
+          if (!range || typeof range.AddComment !== "function") {
+            missing += 1;
+            continue;
+          }
+          used[item.quote] = index + 1;
+          if (range.AddComment(item.comment, input.author)) added += 1;
+          else missing += 1;
+        }
+        return { ok: added > 0, changed: added, missing: missing, error: added ? "" : "No comment could be added." };
+      },
+      { comments, selection: snapshot && snapshot.target === "selection", author: "Guiden" }
+    );
+    return Object.assign({ target: snapshot ? snapshot.targetLabel : "document" }, result || { ok: false });
+  };
   host.insertWriter = async function (html) {
     const selected = String((await host.execute("GetSelectedText", [{}]).catch(() => "")) || "").trim();
     const pasted = await host.pasteWriter(html, { target: selected ? "selection" : "cursor", text: "" });

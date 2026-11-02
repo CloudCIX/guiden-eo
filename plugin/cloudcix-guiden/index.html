@@ -4,24 +4,21 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>CloudCIX Guiden®</title>
-    <link rel="stylesheet" href="styles/main.css?v=2.2.0" />
+    <link rel="stylesheet" href="styles/main.css?v=2.4.0" />
     <script src="../v1/plugins.js"></script>
-    <script defer src="scripts/core.js?v=2.2.0"></script>
-    <script defer src="scripts/host.js?v=2.2.0"></script>
-    <script defer src="scripts/api.js?v=2.2.0"></script>
-    <script defer src="scripts/writer.js?v=2.2.0"></script>
-    <script defer src="scripts/cells.js?v=2.2.0"></script>
-    <script defer src="scripts/slides.js?v=2.2.0"></script>
-    <script defer src="scripts/app.js?v=2.2.0"></script>
+    <script defer src="scripts/core.js?v=2.4.0"></script>
+    <script defer src="scripts/host.js?v=2.4.0"></script>
+    <script defer src="scripts/api.js?v=2.4.0"></script>
+    <script defer src="scripts/writer.js?v=2.4.0"></script>
+    <script defer src="scripts/cells.js?v=2.4.0"></script>
+    <script defer src="scripts/slides.js?v=2.4.0"></script>
+    <script defer src="scripts/menus.js?v=2.4.0"></script>
+    <script defer src="scripts/app.js?v=2.4.0"></script>
   </head>
   <body>
     <main class="shell">
       <header class="topbar">
-        <div>
-          <div class="eyebrow">CloudCIX</div>
-          <h1>Guiden®</h1>
-          <p>Your Euro-Office assistant</p>
-        </div>
+        <h1><span class="eyebrow">CloudCIX</span> Guiden®</h1>
       </header>
       <div class="context-bar" id="contextBar" aria-live="polite">
         <span class="context-dot"></span><span id="contextText">Connecting to Euro-Office…</span
@@ -35,7 +32,11 @@
           ↻
         </button>
       </div>
-      <div class="status" id="status" role="status"></div>
+      <div class="quick-bar" id="quickBar" role="toolbar" aria-label="Quick actions"></div>
+      <div class="status-line">
+        <div class="status" id="status" role="status"></div>
+        <button id="retry" class="retry-button" type="button" hidden>Try again</button>
+      </div>
       <section class="group connect-card" id="connectCard" hidden>
         <div class="section-title">Connect Guiden</div>
         <p id="connectLead" class="connect-lead">
@@ -59,6 +60,28 @@
         <div id="targetWarning" class="warning" hidden></div>
         <div class="preview" id="preview"></div>
         <div id="sources" class="sources" hidden></div>
+        <div class="refine" id="refine" hidden>
+          <div class="refine-chips" id="refineChips">
+            <button type="button" data-refine="Make it shorter.">Shorter</button
+            ><button type="button" data-refine="Make it longer and more detailed.">Longer</button
+            ><button type="button" data-refine="Make it more formal.">More formal</button
+            ><button type="button" data-refine="Make it friendlier and warmer.">Friendlier</button
+            ><button type="button" data-refine="Use simpler words and shorter sentences.">Simpler</button>
+          </div>
+          <div class="refine-input">
+            <input id="refineText" type="text" autocomplete="off" placeholder="Ask Guiden to change this…" /><button
+              id="refineSend"
+              type="button"
+              aria-label="Send"
+              title="Send"
+            >
+              →
+            </button>
+          </div>
+        </div>
+        <label class="remember track-option" id="trackOption" hidden
+          ><input id="trackChanges" type="checkbox" /> Suggest as tracked changes</label
+        >
         <div class="result-actions">
           <button id="apply" class="primary" type="button">Apply</button
           ><button id="insertKnowledge" type="button" hidden>Insert answer</button
@@ -80,13 +103,14 @@
         </details>
         <div class="instruction-block">
           <label for="prompt" id="promptLabel">What would you like to know?</label
+          ><button id="clear" class="link-button clear-prompt" type="button">Clear</button
           ><textarea
             id="prompt"
-            rows="4"
+            rows="3"
             autocomplete="off"
             placeholder="Ask a question about the current selection."
           ></textarea>
-          <div class="prompt-hint" id="promptHint">Ask is read-only and will not change your file.</div>
+          <div class="prompt-hint" id="promptHint">Read-only: your file won't change.</div>
         </div>
         <details class="output-options" id="outputOptions">
           <summary>Options</summary>
@@ -152,7 +176,7 @@
         </details>
         <div class="actions">
           <button id="generate" class="primary" type="button">Ask Guiden</button
-          ><button id="stop" type="button" disabled>Stop</button><button id="clear" type="button">Clear</button>
+          ><button id="stop" type="button" disabled hidden>Stop</button>
         </div>
         <div class="shortcut-hint" id="shortcutHint">Ctrl+Enter to run · Esc to stop</div>
       </section>

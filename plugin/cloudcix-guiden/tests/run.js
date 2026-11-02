@@ -384,6 +384,37 @@ test("Draft at an empty cursor requests new content rather than source text", ()
   );
   assert.strictEqual(action.buildPreview(result, snapshot).kind, "writer-new");
 });
+test("plain-text replacements become one paragraph per line, so paragraph breaks survive", () => {
+  const rewrite = global.Guiden.actions["writer.rewrite"],
+    parse = html => rewrite.parseResponse(JSON.stringify({ status: "ready", replacementHtml: html })).replacementHtml;
+  assert.strictEqual(parse("Le prochain trimestre."), "<p>Le prochain trimestre.</p>");
+  assert.strictEqual(
+    parse("Premier & deux.\n\nSecond <em>ici</em>."),
+    "<p>Premier & deux.</p><p>Second <em>ici</em>.</p>"
+  );
+  assert.strictEqual(parse("Un.<br><br>Deux."), "<p>Un.</p><p>Deux.</p>");
+  assert.strictEqual(parse("<h2>Titre</h2>\nTexte"), "<h2>Titre</h2>\nTexte");
+  const system = rewrite.buildRequest({ target: "selection", targetLabel: "Selection", text: "x" }, "", {
+    tone: "auto",
+    length: "auto",
+    structure: "auto"
+  })[0].content;
+  assert.match(system, /Irish English/);
+  assert.match(system, /placeholder in square brackets/);
+  assert.match(system, /tense/);
+});
+test("a draft at the cursor sees the rest of the document as context, and other actions do not", () => {
+  const options = { tone: "auto", length: "auto", structure: "auto" },
+    snapshot = { target: "cursor", targetLabel: "Current cursor", text: "", contextText: "Our new software platform." },
+    draft = global.Guiden.actions["writer.draft"].buildRequest(snapshot, "Write next steps.", options)[0].content,
+    improve = global.Guiden.actions["writer.improve"].buildRequest(
+      Object.assign({}, snapshot, { target: "selection", text: "x" }),
+      "",
+      options
+    )[0].content;
+  assert.match(draft, /rest of the document, for context only[^]*Our new software platform\./);
+  assert.doesNotMatch(improve, /Our new software platform/);
+});
 test("Ordinary document prose is not mistaken for an assistant refusal", () => {
   const result = global.Guiden.actions["writer.draft"].parseResponse(
     JSON.stringify({ replacementHtml: "<p>This report cannot be completed until Phase 2 begins.</p>" })
@@ -1145,6 +1176,32 @@ test("every toolbar and right-click command opens an action of its own editor", 
     ids.length = 0;
   });
 });
+test("every one-click action in the panel resolves to an action for its editor", () => {
+  const M = global.Guiden.menus;
+  [
+    ["word", true],
+    ["word", false],
+    ["cell", true],
+    ["slide", true],
+    ["slide", false]
+  ].forEach(([editor, selected]) => {
+    const items = M.quickActions(editor, selected);
+    assert(items.length >= 4 && items.length <= 6, editor + " has a short bar");
+    items.forEach(item =>
+      (item.choices || [item]).forEach(choice => {
+        const command = M.commandFor(choice.id);
+        assert(command, choice.id);
+        if (command.actionId.startsWith("knowledge.")) return; // registered by the panel (app.js)
+        assert(global.Guiden.actions[command.actionId], choice.id);
+        assert.strictEqual(global.Guiden.actions[command.actionId].editor, editor, choice.id);
+      })
+    );
+  });
+  assert.deepStrictEqual(
+    M.quickActions("slide", false).map(i => i.text),
+    ["Shorten slide", "Speaker notes", "New slide…", "Ask…"]
+  );
+});
 test("the right-click menu fits what was clicked", () => {
   const labels = (editor, type) => {
     const menu = M.contextMenu(editor, type);
@@ -1156,7 +1213,23 @@ test("the right-click menu fits what was clicked", () => {
     "Summarise selection",
     "Translate"
   ]);
-  assert.deepStrictEqual(labels("word", "Target"), ["Draft here…", "Ask about this document…", "Open Guiden"]);
+  assert.deepStrictEqual(labels("word", "Target"), [
+    "Draft here…",
+    "Review document with comments",
+    "Ask about this document…",
+    "Open Guiden"
+  ]);
+  assert(labels("word", "Selection").includes("Change tone"));
+  assert(labels("slide", "Selection").includes("Change tone"));
+  assert(labels("cell", "Selection").includes("Explain formulas"));
+  assert.deepStrictEqual(M.commandFor("word.tone.formal"), {
+    actionId: "writer.rewrite",
+    run: true,
+    instruction:
+      "Rewrite it in a more formal, professional register: replace casual words, phrases and contractions with formal ones. Keep the meaning, names and numbers."
+  });
+  assert.strictEqual(M.commandFor("word.review").actionId, "writer.review");
+  assert.strictEqual(M.commandFor("cell.explain").actionId, "cells.ask");
   assert.deepStrictEqual(labels("word", "Image"), [], "nothing for an image");
   assert(labels("cell", "Selection").includes("Clean up values"));
   assert(labels("slide", "Selection").includes("Improve text"));
@@ -1249,6 +1322,242 @@ test("the background passes theme changes to the panel", () => {
   bg.plugin.onThemeChanged({ type: "dark", name: "theme-dark", "background-normal": "#333" });
   assert.deepStrictEqual(panel.sent.pop(), ["guidenTheme", { type: "dark", name: "theme-dark" }]);
 });
+// Word-level edits, applied the way the editor applies them.
+function applyEdits(text, edits) {
+  let out = text;
+  for (let k = edits.length - 1; k >= 0; k -= 1) out = out.slice(0, edits[k][0]) + edits[k][2] + out.slice(edits[k][1]);
+  return out;
+}
+test("word-level edits turn the old text into the new, joining a rewritten phrase into one change", () => {
+  const W = global.Guiden.host.wordEdits;
+  const pairs = [
+    ["customers is happy with it", "customers are happy with it"],
+    ["We will focus on reducing the cost of running it.", "We will focus on lower running costs."],
+    ["", "All new."],
+    ["All gone.", ""],
+    ["Same text.", "Same text."],
+    ["a b c", "x a b c y"]
+  ];
+  pairs.forEach(([before, after]) => assert.strictEqual(applyEdits(before, W(before, after)), after));
+  assert.deepStrictEqual(W("customers is happy", "customers are happy"), [[10, 12, "are"]]);
+  assert.deepStrictEqual(
+    W("on reducing the cost", "on lower costs"),
+    [[3, 20, "lower costs"]],
+    "one change, not three"
+  );
+  assert.deepStrictEqual(W("Same.", "Same."), []);
+  assert.strictEqual(W("x ".repeat(1000), "y ".repeat(1000)), null, "too long to compare");
+});
+
+// A tracked document: every character keeps its place, deleted or not, and inserted characters are marked.
+function trackedDocument(paragraphTexts, selection) {
+  const paragraphs = paragraphTexts.map(text => Array.from(text).map(ch => ({ ch })));
+  const visible = chars =>
+    chars
+      .filter(c => !c.deleted)
+      .map(c => c.ch)
+      .join("");
+  const original = chars =>
+    chars
+      .filter(c => !c.inserted)
+      .map(c => c.ch)
+      .join("");
+  function rangeOver(chars, from) {
+    return (start, end) => ({
+      GetText: () =>
+        chars
+          .slice(from + start, from + end)
+          .map(c => c.ch)
+          .join(""),
+      Delete() {
+        chars.slice(from + start, from + end).forEach(c => (c.deleted = true));
+        return true;
+      },
+      AddText(text, where) {
+        const at = from + (where === "before" ? start : end);
+        chars.splice(at, 0, ...Array.from(text).map(ch => ({ ch, inserted: true })));
+        return true;
+      }
+    });
+  }
+  let tracking = false;
+  const doc = {
+    IsTrackRevisions: () => tracking,
+    SetTrackRevisions(on) {
+      tracking = on;
+    },
+    GetRangeBySelect() {
+      if (selection.length === 1) {
+        const p = paragraphs[selection[0].paragraph],
+          from = selection[0].from,
+          sub = rangeOver(p, from);
+        return {
+          GetText: () =>
+            p
+              .slice(from, from + selection[0].length)
+              .map(c => c.ch)
+              .join(""),
+          GetRange: sub
+        };
+      }
+      return {
+        GetText: () => "",
+        GetRange: () => null,
+        GetAllParagraphs: () =>
+          selection.map(item => {
+            const p = paragraphs[item.paragraph];
+            return { GetText: () => p.map(c => c.ch).join("") + "\r\n", GetRange: rangeOver(p, 0) };
+          })
+      };
+    }
+  };
+  global.Api = { GetDocument: () => doc };
+  return {
+    doc,
+    accepted: () => paragraphs.map(visible),
+    rejected: () => paragraphs.map(original),
+    tracking: () => tracking
+  };
+}
+queue("tracked edits mark only the changed words, so rejecting them restores the original", async () => {
+  const before = ["Our team have made progress.", "We will focus on reducing the cost of running it."],
+    after = ["Our team has made progress.", "We will focus on lower running costs."];
+  const tracked = trackedDocument(before, [{ paragraph: 0 }, { paragraph: 1 }]);
+  tracked.doc.SetTrackRevisions(true);
+  const result = await global.Guiden.host.dynamicCommand(global.Guiden.host.trackedEdits, { before, after }, [
+    global.Guiden.host.wordEdits
+  ]);
+  assert.strictEqual(result.ok, true, result.error);
+  assert.deepStrictEqual(tracked.accepted(), after);
+  assert.deepStrictEqual(tracked.rejected(), before);
+});
+queue("tracked edits work on part of one paragraph, and refuse a selection that changed", async () => {
+  const tracked = trackedDocument(["The figures is final."], [{ paragraph: 0, from: 4, length: 16 }]);
+  tracked.doc.SetTrackRevisions(true);
+  const H = global.Guiden.host;
+  const ok = await H.dynamicCommand(H.trackedEdits, { before: ["figures is final"], after: ["figures are final"] }, [
+    H.wordEdits
+  ]);
+  assert.strictEqual(ok.ok, true);
+  assert.deepStrictEqual(tracked.accepted(), ["The figures are final."]);
+  const stale = await H.dynamicCommand(H.trackedEdits, { before: ["something else"], after: ["x"] }, [H.wordEdits]);
+  assert.strictEqual(stale.ok, false);
+});
+queue("Suggest as tracked changes turns tracking on for the edit and back off after", async () => {
+  const tracked = trackedDocument(["The figures is final."], [{ paragraph: 0, from: 0, length: 21 }]);
+  const doc = tracked.doc;
+  doc.InsertContent = () => {
+    throw new Error("the in-place tracked edit should have been used");
+  };
+  const ui = global.Guiden.ui;
+  global.Guiden.ui = {
+    writerNativePayload: () => ({
+      supported: true,
+      linkCount: 0,
+      blocks: [{ paragraphStyle: "", segments: [{ text: "The figures are final." }] }]
+    })
+  };
+  try {
+    const snapshot = { target: "selection", text: "The figures is final.", targetLabel: "Selected text" };
+    const result = await global.Guiden.host.applyWriter("<p>The figures are final.</p>", snapshot, { track: true });
+    assert.strictEqual(result.tracked, true);
+    assert.deepStrictEqual(tracked.accepted(), ["The figures are final."]);
+    assert.deepStrictEqual(tracked.rejected(), ["The figures is final."]);
+    assert.strictEqual(tracked.tracking(), false, "tracking is back off, as it was");
+    doc.SetTrackRevisions(true);
+    const warn = console.warn;
+    console.warn = () => {};
+    await global.Guiden.host
+      .applyWriter("<p>x</p>", snapshot, { track: false })
+      .catch(() => {})
+      .finally(() => (console.warn = warn));
+    assert.strictEqual(tracked.tracking(), true, "Guiden never turns off tracking someone else turned on");
+  } finally {
+    global.Guiden.ui = ui;
+  }
+});
+
+test("a review keeps only comments that quote the text exactly", () => {
+  const review = global.Guiden.actions["writer.review"];
+  const snapshot = { text: "Our team have made progress. Costs is high.", targetLabel: "Whole document" };
+  const result = review.parseResponse(
+    JSON.stringify({
+      status: "ready",
+      comments: [
+        { quote: "team have made", comment: "Use “has”." },
+        { quote: "Costs is high", comment: "Use “are”." },
+        { quote: "not in the text", comment: "Dropped." },
+        { quote: "team have made", comment: "Use “has”." }
+      ]
+    }),
+    snapshot
+  );
+  assert.deepStrictEqual(
+    result.comments.map(c => c.quote),
+    ["team have made", "Costs is high"]
+  );
+  assert.strictEqual(result.unmatched, 1);
+  assert.match(review.buildPreview(result).warning, /1 comment was left out/);
+  const overlapping = review.parseResponse(
+    JSON.stringify({
+      comments: [
+        { quote: "Costs is high", comment: "Use “are”." },
+        { quote: "Costs is high.", comment: "Say how high." },
+        { quote: "team have", comment: "Fine in Irish English." }
+      ]
+    }),
+    snapshot
+  );
+  assert.deepStrictEqual(overlapping.comments, [
+    { quote: "Costs is high", comment: "Use “are”. Say how high." },
+    { quote: "team have", comment: "Fine in Irish English." }
+  ]);
+  assert.deepStrictEqual(review.parseResponse('{"status":"ready","comments":[]}', snapshot).comments, []);
+  assert.throws(
+    () => review.parseResponse('{"comments":[{"quote":"nowhere","comment":"x"}]}', snapshot),
+    /did not quote the document exactly/
+  );
+  const messages = review.buildRequest(snapshot, "");
+  assert.match(messages[0].content, /copied exactly/);
+  assert.strictEqual(messages[messages.length - 1].content, review.defaultInstruction);
+});
+queue("review comments go on the quoted text, within the selection when there is one", async () => {
+  const added = [];
+  const place = (scope, quote) => ({
+    AddComment(text, author) {
+      added.push([scope, quote, text, author]);
+      return {};
+    }
+  });
+  const search = scope => (quote, matchCase) => {
+    assert.strictEqual(matchCase, true);
+    if (quote === "twice") return [place(scope, "twice#1"), place(scope, "twice#2")];
+    return quote === "gone" ? [] : [place(scope, quote)];
+  };
+  global.Api = {
+    GetDocument: () => ({ Search: search("document"), GetRangeBySelect: () => ({ Search: search("selection") }) })
+  };
+  const comments = [
+    { quote: "twice", comment: "First" },
+    { quote: "twice", comment: "Second" },
+    { quote: "gone", comment: "Lost" }
+  ];
+  const result = await global.Guiden.host.addComments(comments, { target: "selection", targetLabel: "Selected text" });
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.changed, 2);
+  assert.strictEqual(result.missing, 1);
+  assert.deepStrictEqual(
+    added.map(a => a.slice(0, 2).concat(a[3])),
+    [
+      ["selection", "twice#1", "Guiden"],
+      ["selection", "twice#2", "Guiden"]
+    ]
+  );
+  added.length = 0;
+  await global.Guiden.host.addComments([{ quote: "x", comment: "y" }], { target: "full_document" });
+  assert.strictEqual(added[0][0], "document");
+});
+
 queued
   .reduce((chain, [name, fn]) => chain.then(() => test(name, fn)), Promise.resolve())
   .then(() => process.stdout.write("\n" + passed + " tests passed.\n"))

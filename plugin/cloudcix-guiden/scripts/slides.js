@@ -3,6 +3,7 @@
   const G = global.Guiden,
     C = G.core;
   const jsonOnly = "Return JSON only. Do not use Markdown or code fences.";
+  const keep = "Keep the meaning, facts, numbers, and tense: a plan that says 'we will' still says what will happen. ";
   function source(snapshot, options) {
     return (
       "Target: " +
@@ -72,8 +73,13 @@
       buildRequest(snapshot, instruction, options) {
         const selected = snapshot.target === "selected_text",
           system = selected
-            ? 'Improve only the selected slide text. Return {"replacementText":"..."}. ' + jsonOnly
-            : 'Update only identified text areas. Preserve unmentioned shapes and all non-text objects. Return {"narrative":"...","updates":[{"shapeIndex":0,"before":"exact original","after":"new text"}]}. shapeIndex must match an indexed area. ' +
+            ? "Improve only the selected slide text. " +
+              keep +
+              'Do not make it longer unless asked. Return {"replacementText":"..."}. ' +
+              jsonOnly
+            : "Update only identified text areas. Preserve unmentioned shapes and all non-text objects. " +
+              keep +
+              'Return {"narrative":"...","updates":[{"shapeIndex":0,"before":"exact original","after":"new text"}]}. shapeIndex must match an indexed area. ' +
               jsonOnly;
         return request(system, snapshot, instruction || defaultInstruction, options);
       },
@@ -190,7 +196,11 @@
     placeholder: "What should the speaker notes emphasise?",
     buildRequest(snapshot, instruction, options) {
       return request(
-        'Create speaker notes for the current slide. Return {"notes":"plain text notes"}. ' + jsonOnly,
+        "Create speaker notes for the current slide: what the presenter should say about each point, in plain sentences they can read aloud. " +
+          "No Markdown, HTML, or headings. Follow the requested length. " +
+          "Talk through only what the slide says. Do not add deadlines, dates, figures, quality claims, promises, or outcomes that are not on the slide or in supplied retrieval context. " +
+          'Return {"notes":"plain text notes"}. ' +
+          jsonOnly,
         snapshot,
         instruction,
         options

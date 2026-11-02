@@ -54,6 +54,20 @@
       : { replacementHtml: html, sources: sources || [] };
   }
 
+  // Guiden sometimes returns plain text (a translation, say) with no paragraph tags. Each line becomes a <p>, so the
+  // edit keeps the paragraph breaks and tracked changes can still match paragraph for paragraph.
+  const BLOCK_TAG = /<\s*(?:p|h[1-6]|ul|ol|li|blockquote|table|div)\b/i;
+  function ensureBlocks(html) {
+    const value = String(html || "").trim();
+    if (!value || BLOCK_TAG.test(value)) return value;
+    return value
+      .split(/\s*(?:<br\s*\/?>\s*){2,}|\s*\r?\n\s*/i)
+      .map(part => part.trim())
+      .filter(Boolean)
+      .map(part => "<p>" + part + "</p>")
+      .join("");
+  }
+
   function parseReplacement(content) {
     const data = C.extractJson(content);
     const sources = C.safeSources(data.sources);
@@ -67,7 +81,9 @@
     const html = data.replacementHtml || data.replacement_html;
     if (typeof html !== "string" || !html.trim())
       throw new Error("Guiden did not return validated replacement content. Nothing can be applied.");
-    return replacementResult(html, sources);
+    // A [placeholder] must stay plain text: Guiden once linked [Media contact] to an unrelated email address.
+    const unlinked = html.replace(/<a\b[^>]*>\s*(\[[^\]<]{1,60}\])\s*<\/a>/gi, "$1");
+    return replacementResult(ensureBlocks(unlinked), sources);
   }
 
   function optionsText(options) {
@@ -81,12 +97,19 @@
       ? 'You are Guiden inside Euro-Office Writer. Answer using the supplied document text and any Guiden retrieval context. Return JSON only: {"answer":"..."}. Do not create citations or URLs; trusted sources are attached by the server.'
       : "You are Guiden inside Euro-Office Writer. " +
         (draft
-          ? "Drafting at an empty cursor is normal: create new content from the instruction and any supplied Guiden retrieval context. Do not require existing document text. "
-          : "Preserve facts, names, numbers, meaning, and existing links. ") +
+          ? "Drafting at an empty cursor is normal: create new content from the instruction and any supplied Guiden retrieval context. Do not require existing document text. " +
+            "When the rest of the document is supplied, the new content must fit its subject, terms, and style; do not repeat or rewrite it. "
+          : "Preserve the facts, names, numbers, meaning, tense, how strong each claim is, and existing links, and change the wording, tone, and sentence structure as much as the instruction asks. " +
+            "Keep one paragraph for each source paragraph unless the instruction asks for a different structure. " +
+            "A collective noun with a plural verb is correct Irish English; leave it as it is. ") +
         'For a valid result return JSON only: {"status":"ready","replacementHtml":"safe document HTML"}. ' +
-        'If required facts or instructions are genuinely missing, return {"status":"needs_input","message":"a specific explanation of what is needed"}; never put a refusal or explanation in replacementHtml. ' +
-        "For company-specific facts, rely on supplied retrieval context and do not invent details. " +
-        "Allowed HTML: h1,h2,h3,p,strong,em,a,ul,ol,li,blockquote,table,thead,tbody,tr,th,td,br. " +
+        'If facts the request depends on are genuinely missing, return {"status":"needs_input","message":"a specific explanation of what is needed"}; never put a refusal or explanation in replacementHtml. ' +
+        "Use only facts from the instruction, the document, and supplied retrieval context, and use each fact only for what it is. " +
+        "Never make up quotes, people, dates, places (including the city in a press release dateline), prices, figures, contact details, sign-in or access details, or facts about real companies, products, or laws. " +
+        "Facts in retrieval context about one product or service do not apply to another unless the context says so. " +
+        "Where the format calls for a detail you were not given, write a short placeholder in square brackets instead: a press release dateline starts with [City] unless the user named a place, a quote is [Spokesperson quote] with no quoted words, and a contact is [Media contact]. " +
+        "Use dates and terms exactly as given; a launch on a given date is not available immediately. " +
+        "Allowed HTML: h1,h2,h3,p,strong,em,a,ul,ol,li,blockquote,table,thead,tbody,tr,th,td,br. Put every paragraph in its own <p>, even when there is only one. " +
         "Use only hyperlinks already present in source HTML or supplied retrieval context; never invent or repair a URL.";
     const context =
       "Action: " +
@@ -97,7 +120,11 @@
       optionsText(options) +
       "\n\nSource text:\n" +
       snapshot.text +
-      (snapshot.sourceHtml ? "\n\nSource HTML (preserve its safe hyperlinks):\n" + snapshot.sourceHtml : "");
+      (snapshot.sourceHtml ? "\n\nSource HTML (preserve its safe hyperlinks):\n" + snapshot.sourceHtml : "") +
+      (draft && snapshot.contextText
+        ? "\n\nThe rest of the document, for context only (write new content that fits it; do not repeat it):\n" +
+          snapshot.contextText
+        : "");
     return C.groundedMessages(system, context, instruction);
   }
 
@@ -130,10 +157,10 @@
         };
       },
       revalidateTarget: mutates ? snapshot => G.host.revalidate(snapshot) : async () => ({ ok: true }),
-      async apply(result, snapshot) {
+      async apply(result, snapshot, applyOptions) {
         if (result.needsInput || !result.replacementHtml)
           throw new Error("There is no validated document change to apply.");
-        return G.host.applyWriter(G.ui.sanitizeHtml(result.replacementHtml), snapshot);
+        return G.host.applyWriter(G.ui.sanitizeHtml(result.replacementHtml), snapshot, applyOptions);
       }
     };
     G.registerAction(action);
@@ -187,6 +214,82 @@
     "Draft new content from the instruction.",
     "Describe what you want Guiden to draft."
   );
+  // Review: comments in the editor's own comment pane, each anchored to a phrase quoted from the text. Quotes Guiden
+  // did not copy exactly from the text are dropped before the preview, so every comment shown can be placed.
+  const REVIEW_LIMIT = 25;
+  function parseReview(content, snapshot) {
+    const data = C.extractJson(content);
+    if (String(data.status || "").toLowerCase() === "needs_input" && typeof data.message === "string")
+      return { needsInput: true, message: data.message.trim(), sources: [] };
+    if (!Array.isArray(data.comments)) throw new Error("Guiden did not return a list of comments.");
+    const text = String((snapshot && snapshot.text) || ""),
+      seen = new Set(),
+      comments = [];
+    let unmatched = 0;
+    data.comments.forEach(item => {
+      const quote = String((item && item.quote) || "").trim(),
+        comment = String((item && item.comment) || "").trim();
+      if (!quote || !comment || seen.has(quote + "\n" + comment)) return;
+      seen.add(quote + "\n" + comment);
+      if (text.indexOf(quote) < 0) {
+        unmatched += 1;
+        return;
+      }
+      // A quote inside another quote would stack two comments on the same words, so the points are joined.
+      const overlap = comments.find(c => c.quote !== quote && (c.quote.includes(quote) || quote.includes(c.quote)));
+      if (overlap) overlap.comment += " " + comment;
+      else if (comments.length < REVIEW_LIMIT) comments.push({ quote, comment });
+    });
+    if (!comments.length && unmatched)
+      throw new Error("Guiden's comments did not quote the document exactly, so none could be placed. Try again.");
+    return { comments, unmatched, sources: [] };
+  }
+  G.registerAction({
+    id: "writer.review",
+    editor: "word",
+    label: "Review with Comments",
+    description: "Leave review comments without changing the text",
+    mutates: true,
+    supportedTargets: ["selection", "full_document"],
+    defaultInstruction:
+      "Review this as a careful editor. Comment on errors, unclear wording, missing information, inconsistencies and tone.",
+    placeholder: "What should the review focus on? For example: legal risks, or clarity for customers.",
+    buildRequest(snapshot, instruction) {
+      const system =
+        "You are Guiden inside Euro-Office Writer, reviewing a document the way a careful colleague would. " +
+        'Return JSON only: {"status":"ready","comments":[{"quote":"...","comment":"..."}]}. ' +
+        "Each quote is a short phrase of 2 to 12 words copied exactly, character for character, from the source text, " +
+        "long enough to be unique. Each comment says what the problem is and how to fix it, in one or two sentences. " +
+        "Comment only where something is actually wrong, unclear, or missing; leave correct text alone, and leave out weak comments. " +
+        "Never comment on a collective noun with a plural verb, such as 'the team have': it is correct Irish English, not an agreement error. " +
+        "Name grammar accurately: only call something passive when it is in the passive voice. " +
+        "Comment on each phrase once and never quote overlapping phrases; put every point about the same words in one comment. " +
+        "Give at most 15 comments, the most important first, and an empty list when nothing needs a comment. " +
+        "Do not rewrite the document.";
+      const context = "Target: " + snapshot.targetLabel + "\n\nSource text:\n" + snapshot.text;
+      return C.groundedMessages(system, context, instruction || this.defaultInstruction);
+    },
+    parseResponse: parseReview,
+    buildPreview(result) {
+      if (result.needsInput) return { kind: "needs-input", message: result.message, sources: [] };
+      return {
+        kind: "comments",
+        comments: result.comments,
+        sources: [],
+        warning: result.unmatched
+          ? result.unmatched +
+            (result.unmatched === 1 ? " comment was" : " comments were") +
+            " left out because the text it quoted is not in the document."
+          : ""
+      };
+    },
+    revalidateTarget: snapshot => G.host.revalidate(snapshot),
+    async apply(result, snapshot) {
+      if (result.needsInput || !result.comments || !result.comments.length)
+        throw new Error("There are no comments to add.");
+      return G.host.addComments(result.comments, snapshot);
+    }
+  });
   register(
     "writer.convert",
     "Convert Format",
