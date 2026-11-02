@@ -241,7 +241,8 @@ const cases = [
       assert(!/mailto:|[\w.+-]+@[\w-]+\.[a-z]{2,}/i.test(result.replacementHtml), "made up an email contact");
       assert(!/\+\d{2,3}[\s\d()-]{6,}|\b0\d{1,2}[\s-]?\d{3}[\s-]?\d{4}\b/.test(text), "made up a phone number");
       assert(!/[“"][^”"]{15,}[”"],?\s+(?:said|says|added)\b/i.test(text), "made up a quote");
-      assert(!/\b(?:Dublin|Cork|Galway|Limerick)\b/.test(text), "made up a dateline city");
+      // A dateline is a city followed by the date; an address elsewhere (from retrieval) is not one.
+      assert(!/\b(?:Dublin|Cork|Galway|Limerick)\b[^.<\n]{0,30}\b1 December\b/.test(text), "made up a dateline city");
       assert(!/credentials|log ?in with|sign ?in with/i.test(text), "made up how people sign in");
       assert(!/\bimmediately\b/i.test(text), "said available immediately, but it launches on 1 December");
       return { words: words(result.replacementHtml), placeholders: text.match(/\[[^\]]{3,60}\]/g) || [] };
@@ -269,6 +270,7 @@ const cases = [
     instruction: "Clean up the region names: trim spaces and use title case.",
     check(result) {
       assert(result.updates.length >= 3, "too few updates: " + JSON.stringify(result.updates));
+      assert(!/\bteam\b|priorit/i.test(result.narrative), "narrative says more than what changed: " + result.narrative);
       return { updates: result.updates.map(u => u.before + " → " + u.after) };
     }
   },
@@ -289,7 +291,10 @@ const cases = [
     instruction: G.menus.commandFor("cell.explain").instruction,
     check(result) {
       assert(/VAT|tax|23|B2/i.test(result.answer), "did not explain the formula: " + result.answer);
-      assert(/1\.23/.test(result.answer) && /\b123\b/.test(result.answer), "did not work it through: " + result.answer);
+      assert(
+        /1\.23|1 ?\+ ?0\.23/.test(result.answer) && /\b123\b/.test(result.answer),
+        "did not work it through: " + result.answer
+      );
       return { answer: result.answer };
     }
   },
@@ -320,6 +325,10 @@ const cases = [
       assert(/reliab/i.test(notes) && /cost/i.test(notes) && /platform/i.test(notes), "missed a point: " + notes);
       assert(words(notes) >= 20 && words(notes) <= 250, "odd length: " + words(notes) + " words");
       assert(!/\d+\s?%|€\s?\d/.test(notes), "made up a figure: " + notes);
+      assert(
+        !/end of the (?:quarter|year|month)|on time|on schedule|deadline/i.test(notes),
+        "made up a deadline: " + notes
+      );
       assert(!AMERICAN.test(notes), "American spelling: " + notes);
       return { words: words(notes), notes };
     }
@@ -363,7 +372,8 @@ function label(item, run, runs) {
     runs = Math.max(1, parseInt(process.env.GUIDEN_RUNS || "1", 10) || 1);
   const report = { when: new Date().toISOString(), url: G.api.url, model: G.api.model, runs, cases: [] };
   let failed = 0;
-  const selected = cases.filter(c => c.name.includes(only));
+  // GUIDEN_TEST="Change tone|speaker notes" runs every case whose name contains one of the parts.
+  const selected = cases.filter(c => only.split("|").some(part => c.name.includes(part)));
   for (let run = 1; run <= runs; run += 1)
     for (const item of selected) {
       const action = G.actions[item.actionId],

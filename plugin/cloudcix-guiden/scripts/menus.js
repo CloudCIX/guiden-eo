@@ -12,7 +12,7 @@
     [
       "formal",
       "More formal",
-      "Rewrite it in a more formal, professional register: replace casual words, phrases and contractions with formal ones. Keep the meaning, names and numbers."
+      "Rewrite it in a more formal, professional register: replace casual words, phrases and contractions with formal ones. Keep the meaning, names and numbers, and keep every claim exactly as strong as it is: do not turn 'good' into 'significant' or 'a lot' into 'substantial'."
     ],
     [
       "friendly",

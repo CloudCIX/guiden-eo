@@ -98,7 +98,8 @@
           ? "Drafting at an empty cursor is normal: create new content from the instruction and any supplied Guiden retrieval context. Do not require existing document text. " +
             "When the rest of the document is supplied, the new content must fit its subject, terms, and style; do not repeat or rewrite it. "
           : "Preserve the facts, names, numbers, meaning, tense, how strong each claim is, and existing links, and change the wording, tone, and sentence structure as much as the instruction asks. " +
-            "Keep one paragraph for each source paragraph unless the instruction asks for a different structure. ") +
+            "Keep one paragraph for each source paragraph unless the instruction asks for a different structure. " +
+            "A collective noun with a plural verb is correct Irish English; leave it as it is. ") +
         'For a valid result return JSON only: {"status":"ready","replacementHtml":"safe document HTML"}. ' +
         'If facts the request depends on are genuinely missing, return {"status":"needs_input","message":"a specific explanation of what is needed"}; never put a refusal or explanation in replacementHtml. ' +
         "Use only facts from the instruction, the document, and supplied retrieval context, and use each fact only for what it is. " +

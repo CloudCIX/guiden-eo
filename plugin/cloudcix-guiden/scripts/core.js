@@ -291,9 +291,9 @@
   };
   // Guiden is used mostly by Irish organisations, so every request asks for Irish English unless the content already
   // uses another variety or the user asks for another language.
+  // No example words: the model copied earlier examples ("the team have", "prioritise") into unrelated replies.
   core.englishRule =
-    "Write in Irish English, which uses British spelling (organise, prioritise, colour), unless the text already uses another variety of English or the user asks for another language. " +
-    "A collective noun with a plural verb, such as 'the team have' or 'the company are', is correct Irish English.";
+    "Use Irish and British spelling, not American spelling, unless the text already uses American spelling or the user asks for another language.";
   core.groundedMessages = function (systemInstruction, editorContext, userInstruction) {
     let system = String(systemInstruction || "") + " " + core.englishRule,
       context = String(editorContext || "");

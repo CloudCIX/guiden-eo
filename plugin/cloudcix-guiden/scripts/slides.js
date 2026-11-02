@@ -198,7 +198,7 @@
       return request(
         "Create speaker notes for the current slide: what the presenter should say about each point, in plain sentences they can read aloud. " +
           "No Markdown, HTML, or headings. Follow the requested length. " +
-          "Expand on the slide's own points; do not add facts, figures, promises, or claims that are not on the slide or in supplied retrieval context. " +
+          "Talk through only what the slide says. Do not add deadlines, dates, figures, quality claims, promises, or outcomes that are not on the slide or in supplied retrieval context. " +
           'Return {"notes":"plain text notes"}. ' +
           jsonOnly,
         snapshot,
