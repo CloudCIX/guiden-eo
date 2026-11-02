@@ -45,6 +45,25 @@ sudo ./scripts/preflight-runtime.sh euro-office
 sudo ./scripts/install-plugin.sh euro-office
 ```
 
+## Build It Into The Image
+
+For Kubernetes, or anywhere the editor's pods are replaced rather than patched, build the plugin into the editor image
+instead of copying it into a running container. The `Dockerfile` adds the plugin and its runtime files to Euro-Office
+v9.3.7, pinned by digest.
+
+GitHub Actions (`.github/workflows/image.yml`) validates, tests and builds every pull request, and publishes
+`ghcr.io/cloudcix/guiden-eo` from `main` (tags `main` and `sha-<commit>`) and from version tags such as `v2.0.17`.
+Deploy by the digest in the job's summary, so a pod never picks up a different build.
+
+To build by hand:
+
+```sh
+docker build -t guiden-eo .
+```
+
+Euro-Office lists the plugins it finds when it starts, so new pods show Guiden under Plugins with no editor config
+change.
+
 ## Use
 
 1. Open a document, spreadsheet, or presentation in Euro-Office from Nextcloud.
