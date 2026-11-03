@@ -585,9 +585,6 @@ queue("dynamic slide commands compile and keep indexed targets", async () => {
   );
   assert.strictEqual(changed.changed, 1);
   assert.strictEqual(contents[1].text, "ClearBody");
-  const created = await global.Guiden.host.createSlide({ title: "New title", bullets: ["One", "Two"] });
-  assert.strictEqual(created.changed, 1);
-  assert(presentation.added);
 });
 queue("mocked host integration applies only sparse coordinates", async () => {
   let received;
@@ -611,6 +608,334 @@ queue("mocked host integration applies only sparse coordinates", async () => {
   const applied = await action.apply(result, snapshot);
   assert.strictEqual(applied.changed, 1);
   assert.deepStrictEqual(received, result.updates);
+});
+// A small presentation model: layouts made of placeholders, slides that copy them on ApplyLayout.
+function mockDeck(layoutSpecs) {
+  const log = { moves: [], shapes: [], fills: [] };
+  function content() {
+    return {
+      paras: [],
+      RemoveAllElements() {
+        this.paras = [];
+      },
+      Push(p) {
+        this.paras.push(p);
+      },
+      lines() {
+        return this.paras.map(p => p.text);
+      }
+    };
+  }
+  function placeholder(type, x) {
+    return {
+      type,
+      x: x || 0,
+      deleted: false,
+      doc: content(),
+      GetPlaceholder() {
+        return { GetType: () => type };
+      },
+      GetPosX() {
+        return this.x;
+      },
+      GetDocContent() {
+        return this.doc;
+      },
+      Delete() {
+        this.deleted = true;
+      }
+    };
+  }
+  const layouts = layoutSpecs.map(spec => ({
+    spec,
+    GetName: () => spec.name,
+    GetAllShapes: () => spec.placeholders.map((t, i) => placeholder(t, i)),
+    GetMaster: () => master
+  }));
+  const master = {
+    GetLayoutsCount: () => layouts.length,
+    GetLayout: i => layouts[i],
+    GetLayoutByType: type => layouts.find(l => l.spec.type === type) || null
+  };
+  const slides = [];
+  function makeSlide() {
+    return {
+      layout: null,
+      shapes: [],
+      ApplyLayout(layout) {
+        this.layout = layout;
+        this.shapes = layout.spec.placeholders
+          .filter(t => !/date|footer|sldNum/.test(t))
+          .map((t, i) => placeholder(t, i));
+        return true;
+      },
+      GetLayout() {
+        return this.layout;
+      },
+      GetAllShapes() {
+        return this.shapes;
+      },
+      GetSlideIndex() {
+        return slides.indexOf(this);
+      },
+      MoveTo(i) {
+        log.moves.push(i);
+        slides.splice(slides.indexOf(this), 1);
+        slides.splice(i, 0, this);
+        return true;
+      },
+      AddObject(shape) {
+        this.shapes.push(shape);
+        log.shapes.push(shape);
+      }
+    };
+  }
+  const first = makeSlide();
+  first.ApplyLayout(layouts[0]);
+  slides.push(first, makeSlide());
+  const presentation = {
+    GetCurrentVisibleSlide: () => first,
+    GetMaster: () => master,
+    GetWidth: () => 12192000,
+    GetHeight: () => 6858000,
+    AddSlide(slide) {
+      slides.push(slide);
+      return true;
+    }
+  };
+  const api = {
+    GetPresentation: () => presentation,
+    CreateSlide: makeSlide,
+    CreateParagraph() {
+      return {
+        text: "",
+        AddText(value) {
+          this.text += value;
+          const para = this;
+          return {
+            SetFill(fill) {
+              log.fills.push([para.text, fill]);
+            },
+            SetFontSize() {},
+            SetBold() {}
+          };
+        },
+        SetBullet() {},
+        SetJc() {}
+      };
+    },
+    CreateBullet: () => ({}),
+    CreateSchemeColor: name => ({ scheme: name }),
+    CreateSolidFill: color => ({ solid: color }),
+    CreateNoFill: () => ({}),
+    CreateStroke: () => ({}),
+    CreateShape() {
+      const shape = placeholder("", 0);
+      shape.GetPlaceholder = () => null;
+      shape.SetPosition = () => {};
+      return shape;
+    }
+  };
+  return { api, slides, log };
+}
+const officeLayouts = [
+  { name: "Title Slide", type: "title", placeholders: ["ctrTitle", "subTitle", "date", "footer", "sldNum"] },
+  { name: "Title and Content", type: "obj", placeholders: ["title", "unknown", "date", "footer", "sldNum"] },
+  { name: "Section Header", type: "secHead", placeholders: ["title", "body", "date", "footer", "sldNum"] },
+  { name: "Two Content", type: "twoObj", placeholders: ["title", "unknown", "unknown", "date"] },
+  { name: "Comparison", type: "twoTxTwoObj", placeholders: ["title", "body", "unknown", "body", "unknown"] },
+  { name: "Title and Vertical Text", type: "vertTx", placeholders: ["title", "body"] },
+  { name: "Blank", type: "blank", placeholders: ["date", "footer", "sldNum"] }
+];
+queue("new slides use the deck's own layouts and fill their text areas", async () => {
+  const deck = mockDeck(officeLayouts);
+  global.Api = deck.api;
+  const created = await global.Guiden.host.createSlides([
+    { layout: "title", title: "High Performance Computing", subtitle: "An introduction", bullets: [] },
+    { layout: "content", title: "Why HPC", subtitle: "", bullets: ["Faster research", "Bigger models"] },
+    {
+      layout: "two",
+      title: "Cloud or bare metal",
+      left: { heading: "Cloud", bullets: ["Elastic"] },
+      right: { heading: "Physical", bullets: ["Predictable"] }
+    },
+    { layout: "section", title: "Getting started", subtitle: "", bullets: [] }
+  ]);
+  assert.strictEqual(created.changed, 4);
+  assert.deepStrictEqual(created.warnings, []);
+  // Inserted straight after the current (first) slide, in order.
+  assert.deepStrictEqual(deck.log.moves, [1, 2, 3, 4]);
+  const [title, content, two, section] = deck.slides.slice(1, 5);
+  assert.strictEqual(title.layout.spec.name, "Title Slide");
+  assert.deepStrictEqual(title.shapes[0].doc.lines(), ["High Performance Computing"]);
+  assert.deepStrictEqual(title.shapes[1].doc.lines(), ["An introduction"]);
+  assert.strictEqual(content.layout.spec.name, "Title and Content");
+  assert.deepStrictEqual(content.shapes[1].doc.lines(), ["Faster research", "Bigger models"]);
+  assert.strictEqual(two.layout.spec.name, "Comparison");
+  assert.deepStrictEqual(two.shapes[1].doc.lines(), ["Cloud"]);
+  assert.deepStrictEqual(two.shapes[2].doc.lines(), ["Elastic"]);
+  assert.deepStrictEqual(two.shapes[4].doc.lines(), ["Predictable"]);
+  assert.strictEqual(section.layout.spec.name, "Section Header");
+  // No subtitle: the empty text area is removed rather than left showing "Click to add text".
+  assert.strictEqual(section.shapes[1].deleted, true);
+  assert.strictEqual(deck.log.shapes.length, 0);
+});
+queue("new slides without a matching layout use text in the theme's text colour", async () => {
+  const deck = mockDeck([{ name: "Blank", type: "blank", placeholders: [] }]);
+  global.Api = deck.api;
+  const created = await global.Guiden.host.createSlides([
+    { layout: "content", title: "Intro", subtitle: "", bullets: ["One", "Two"] }
+  ]);
+  assert.strictEqual(created.changed, 1);
+  assert.strictEqual(created.warnings.length, 1);
+  assert.strictEqual(deck.log.shapes.length, 2);
+  assert.strictEqual(deck.log.fills.length, 3);
+  deck.log.fills.forEach(([, fill]) => assert.deepStrictEqual(fill, { solid: { scheme: "tx1" } }));
+});
+test("new slide responses are cleaned and checked", () => {
+  const parse = text => global.Guiden.actions["slides.new"].parseResponse(text).slides;
+  // The older single-slide shape still works, and bullet characters are left to the layout.
+  assert.deepStrictEqual(parse('{"title":"Intro","bullets":["• One","2. Two","- Three"]}'), [
+    { layout: "content", title: "Intro", subtitle: "", bullets: ["One", "Two", "Three"], left: null, right: null }
+  ]);
+  const many = Array.from({ length: 12 }, (_, i) => ({ layout: "content", title: "S" + i, bullets: ["x"] }));
+  assert.strictEqual(parse(JSON.stringify({ slides: many })).length, 8);
+  const odd = parse(
+    JSON.stringify({
+      slides: [
+        { layout: "fancy", title: "A", bullets: ["x"] },
+        { layout: "two", title: "B", left: { bullets: ["l"] }, right: { bullets: [] } },
+        { layout: "title", title: "C", subtitle: "Sub" }
+      ]
+    })
+  );
+  assert.deepStrictEqual(
+    odd.map(s => s.layout),
+    ["content", "content", "title"]
+  );
+  assert.deepStrictEqual(odd[1].bullets, ["l"]);
+  assert.throws(() => parse('{"slides":[{"layout":"content","title":"","bullets":["x"]}]}'), /without a title/);
+  assert.throws(() => parse('{"slides":[{"layout":"content","title":"T","bullets":[]}]}'), /without any bullets/);
+  assert.throws(() => parse('{"answer":"no"}'), /valid slide/);
+});
+test("Design deck only accepts one of the ready-made designs", () => {
+  const action = global.Guiden.actions["slides.design"];
+  const messages = action.buildRequest({ targetLabel: "Slide 1", text: "[0] HPC" }, "Make it dark", {
+    tone: "auto",
+    length: "auto"
+  });
+  global.Guiden.designs.forEach(d => assert(messages[0].content.includes(d.id + ": ")));
+  assert.deepStrictEqual(action.parseResponse('{"design":"Midnight","reason":"Dark, for a tech talk."}'), {
+    design: "midnight",
+    reason: "Dark, for a tech talk."
+  });
+  assert.throws(() => action.parseResponse('{"design":"neon"}'), /did not choose/);
+  // Every design keeps text readable on its background, and uses fonts Euro-Office ships.
+  const luminance = hex => {
+    const c = [1, 3, 5]
+      .map(i => parseInt(hex.slice(i, i + 2), 16) / 255)
+      .map(v => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)));
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  };
+  const contrast = (a, b) => {
+    const [x, y] = [luminance(a), luminance(b)].sort((m, n) => n - m);
+    return (x + 0.05) / (y + 0.05);
+  };
+  const shipped = ["Open Sans", "Open Sans Semibold", "Ubuntu", "Caladea", "Carlito", "Liberation Sans"];
+  global.Guiden.designs.forEach(d => {
+    assert(contrast(d.colors.dk1, d.colors.lt1) >= 7, d.id + " body text contrast");
+    assert(contrast(d.colors.dk2, d.colors.lt1) >= 4.5, d.id + " second text colour contrast");
+    assert(shipped.includes(d.fonts.heading) && shipped.includes(d.fonts.body), d.id + " fonts");
+    assert.strictEqual(Object.keys(d.colors).length, 12);
+  });
+});
+queue("Design deck sets the theme on every master and replaces its own accents", async () => {
+  const log = { colors: null, fonts: null, background: null, added: [] };
+  function owner(name, placeholders, shapes) {
+    return {
+      name,
+      shapes: shapes.concat(
+        (placeholders || []).map(t => ({ GetPlaceholder: () => ({ GetType: () => t }), GetName: () => t }))
+      ),
+      GetName() {
+        return this.name;
+      },
+      GetAllShapes() {
+        return this.shapes.filter(x => !x.deleted);
+      },
+      AddObject(shape) {
+        this.shapes.push(shape);
+        log.added.push(this.name + ":" + shape.name);
+      }
+    };
+  }
+  const old = {
+    GetName: () => "Guiden design top",
+    Delete() {
+      this.deleted = true;
+    }
+  };
+  const titleLayout = owner("Title Slide", ["ctrTitle", "subTitle"], []),
+    contentLayout = owner("Title and Content", ["title", "body"], []),
+    master = owner("master", [], [old]);
+  master.GetAllLayouts = () => [titleLayout, contentLayout];
+  master.SetBackground = fill => (log.background = fill);
+  master.GetTheme = () => ({
+    SetColorScheme: c => (log.colors = c),
+    SetFontScheme: f => (log.fonts = f)
+  });
+  global.Api = {
+    GetPresentation: () => ({
+      GetMaster: () => master,
+      GetAllSlideMasters: () => [master],
+      GetWidth: () => 12192000,
+      GetHeight: () => 6858000
+    }),
+    CreateRGBColor: (r, g, b) => [r, g, b],
+    CreateThemeColorScheme(colors, name) {
+      const keys = ["accent1", "accent2", "accent3", "accent4", "accent5", "accent6", "dk1", "dk2"].concat([
+        "folHlink",
+        "hlink",
+        "lt1",
+        "lt2"
+      ]);
+      const json = { name };
+      keys.forEach(
+        (k, i) => (json[k] = { color: { rgba: { red: colors[i][0], green: colors[i][1], blue: colors[i][2] } } })
+      );
+      return { colors, ToJSON: () => JSON.stringify(json) };
+    },
+    CreateThemeFontScheme: (...args) => args,
+    CreateSchemeColor: name => ({ scheme: name }),
+    CreateSolidFill: color => ({ solid: color }),
+    CreateNoFill: () => ({}),
+    CreateStroke: () => ({}),
+    CreateShape() {
+      return {
+        SetPosition() {},
+        SetName(name) {
+          this.name = name;
+        },
+        GetName() {
+          return this.name;
+        }
+      };
+    }
+  };
+  const harbour = global.Guiden.designs.filter(d => d.id === "harbour")[0];
+  const applied = await global.Guiden.host.applyDesign(harbour);
+  assert.strictEqual(applied.target, "Harbour design");
+  assert.deepStrictEqual(log.colors.colors[6], [0x1b, 0x27, 0x33]); // dk1, the text colour
+  assert.deepStrictEqual(log.colors.colors[10], [0xff, 0xff, 0xff]); // lt1, the background
+  assert.strictEqual(log.fonts[0], "Open Sans Semibold");
+  assert.strictEqual(log.fonts[3], "Open Sans");
+  assert.deepStrictEqual(log.background, { solid: { scheme: "bg1" } });
+  assert.strictEqual(old.deleted, true);
+  assert.deepStrictEqual(log.added, [
+    "master:Guiden design top",
+    "master:Guiden design foot",
+    "Title Slide:Guiden design band"
+  ]);
 });
 queue("mocked slide integration preserves shape identity", async () => {
   let received;
@@ -774,7 +1099,10 @@ test("Copy gives the preview's text, not the raw JSON reply", () => {
     ),
     "A\tB\n1\t2"
   );
-  assert.strictEqual(C.previewText({ kind: "new-slide", title: "T", bullets: ["a", "b"] }, raw), "T\n\n• a\n\n• b");
+  assert.strictEqual(
+    C.previewText({ kind: "new-slides", slides: [{ layout: "content", title: "T", bullets: ["a", "b"] }] }, raw),
+    "T\n\n• a\n\n• b"
+  );
   assert.strictEqual(C.previewText({ kind: "answer", answer: "Hello" }, raw), "Hello");
   assert.strictEqual(C.previewText({ kind: "unknown" }, raw), raw);
 });
@@ -1199,7 +1527,22 @@ test("every one-click action in the panel resolves to an action for its editor",
   });
   assert.deepStrictEqual(
     M.quickActions("slide", false).map(i => i.text),
-    ["Shorten slide", "Speaker notes", "New slide…", "Ask…"]
+    ["Shorten slide", "Speaker notes", "New slide…", "Design deck", "Ask…"]
+  );
+});
+test("every toolbar icon exists in the light and dark sets", () => {
+  const fs = require("fs"),
+    path = require("path"),
+    M = global.Guiden.menus;
+  const walk = items =>
+    items.reduce((all, item) => all.concat(item.icons ? [item.icons] : [], walk(item.items || [])), []);
+  ["word", "cell", "slide"].forEach(editor =>
+    walk(M.toolbar(editor)).forEach(icon =>
+      ["light", "dark"].forEach(theme => {
+        const file = icon.replace("%theme-type%(light|dark)", theme).replace("%extension%(svg)", "svg");
+        assert(fs.existsSync(path.join(__dirname, "..", file)), file);
+      })
+    )
   );
 });
 test("the right-click menu fits what was clicked", () => {

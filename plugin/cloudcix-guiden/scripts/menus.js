@@ -53,6 +53,7 @@
     "slide.rewrite": { actionId: "slides.rewrite", run: false, label: "Rewrite slide…" },
     "slide.notes": { actionId: "slides.notes", run: true, label: "Write speaker notes" },
     "slide.new": { actionId: "slides.new", run: false, label: "New slide…" },
+    "slide.design": { actionId: "slides.design", run: true, label: "Design deck" },
     "slide.ask": { actionId: "slides.ask", run: false, label: "Ask about this slide…" },
     "slide.knowledge": { actionId: "knowledge.slide", run: false, label: "Ask Company Knowledge…" }
   };
@@ -189,7 +190,8 @@
         button("slide.improve", "improve", "Improve", "Improve the selected text", { separator: true }),
         button("slide.shorten", "summarise", "Shorten", "Shorten the current slide"),
         button("slide.notes", "notes", "Notes", "Write speaker notes for the current slide"),
-        button("slide.new", "slide", "New slide", "Create a new slide"),
+        button("slide.new", "slide", "New slide", "Create new slides in this deck's design"),
+        button("slide.design", "design", "Design", "Give the whole deck a ready-made design"),
         button("slide.ask", "ask", "Ask", "Ask a question about the current slide", { separator: true }),
         button("slide.knowledge", "knowledge", "Company Knowledge", "Ask your company's knowledge")
       ];
@@ -236,6 +238,7 @@
             q("slide.shorten", "Shorten slide"),
             q("slide.notes", "Speaker notes"),
             q("slide.new", "New slide…"),
+            q("slide.design", "Design deck"),
             q("slide.ask", "Ask…")
           ];
     return [];

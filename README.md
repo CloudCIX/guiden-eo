@@ -73,13 +73,13 @@ Guiden starts with the editor. It adds:
 
 - a **Guiden** toolbar tab with one-click actions for the editor in use (Improve, Fix, Summarise, Translate, Ask and
   Company Knowledge in documents; Analyse, Clean up, Formula, Format and Table in spreadsheets; Improve, Shorten,
-  Notes and New slide in presentations);
+  Notes, New slide and Design in presentations);
 - a **Guiden** submenu on the right-click menu, with actions for what is under the cursor: the selected text, the
   cursor position in a document, the selected cells, or the current slide;
 - the Guiden panel, with a button in the right sidebar. Any action opens it. Its top row has one-click actions for
   what is selected right now: Improve, Fix, Shorter, Translate, Tone and Ask for selected text; Draft, Review
   document, Ask and Company knowledge with nothing selected; Analyse, Explain formulas, Clean up and Formula in
-  spreadsheets; Shorten slide, Speaker notes, New slide and Ask on a slide.
+  spreadsheets; Shorten slide, Speaker notes, New slide, Design deck and Ask on a slide.
 
 - **Change tone** (more formal, friendlier, more concise, simpler, more confident) for selected text in documents and
   presentations, **Review with comments** for a selection or a whole document, and **Explain formulas** for cells.
@@ -153,7 +153,16 @@ it belongs to, as it is when they type it, so give each person their own key and
 - Writer provides explicit read, rewrite, correction, summary, drafting, translation, and document-conversion actions. Mutations show a before/after preview and revalidate the selected text before applying.
 - Writer opens with **Draft New Content** selected by default; users can switch to Ask or another operation from the compact action picker.
 - Cells uses sparse value updates, protected formulas, validated formatting rules, exact destinations, and empty-range checks for new tables and columns. Analysis remains read-only.
-- Slides reads indexed text areas and updates only returned shape indexes. It can also create a new slide, preview an outline, or add speaker notes without replacing unrelated objects.
+- Slides reads indexed text areas and updates only returned shape indexes. It can also create new slides, preview an outline, or add speaker notes without replacing unrelated objects.
+- **New slide** adds up to eight slides after the current one. Guiden picks a layout for each (title, section, title
+  and bullets, or two columns) and fills the deck's own layout of that kind, so new slides take the deck's fonts,
+  colours, bullets and positions. A deck with no such layout gets text boxes in the theme's text colour.
+- **Design deck** applies one of six ready-made designs (Harbour, Midnight, Paper, Forest, Mono, Sunrise) to every
+  slide master: theme colours, theme fonts, background and accent bars at the slide edges. Guiden suggests one for the
+  deck and the preview can switch to any other without a new request. The designs are fixed, so text always contrasts
+  with its background and every font ships with Euro-Office. Undo in the editor puts the old design back.
+- The API key boxes are text inputs masked with `-webkit-text-security` rather than password fields, so password
+  managers do not treat the panel as a login form and offer passwords on the instruction box.
 - The plugin uses the local Document Server plugin runtime path `../v1/plugins.js`; it does not depend on `onlyoffice.github.io` at runtime.
 - The plugin calls `https://inference.cloudcix.com/v1/guiden/chat/completions` with `model: Mistral-Medium-3.5`, `stream: true`, `response_format: {"type":"json_object"}`, and `max_tokens: 15000`. Responses stream from the service and are validated against the selected action before a preview is shown.
 - While a response is streaming, the result panel shows readable text as it arrives. Mutation controls remain hidden until the complete response passes schema and target validation.

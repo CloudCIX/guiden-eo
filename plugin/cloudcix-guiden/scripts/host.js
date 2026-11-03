@@ -343,8 +343,13 @@
         ? presentation.GetCurrentVisibleSlide()
         : presentation.GetCurrentSlide();
       const all = presentation.GetAllSlides ? presentation.GetAllSlides() : [];
-      let slideIndex = 0;
-      for (let i = 0; i < all.length; i += 1) if (all[i] === slide) slideIndex = i;
+      // The editor hands out a new wrapper object on every call, so a slide is found by its index, not by identity.
+      let slideIndex = slide && slide.GetSlideIndex ? slide.GetSlideIndex() : -1;
+      if (!(slideIndex >= 0) && presentation.GetCurSlideIndex) slideIndex = presentation.GetCurSlideIndex();
+      if (!(slideIndex >= 0)) {
+        slideIndex = 0;
+        for (let i = 0; i < all.length; i += 1) if (all[i] === slide) slideIndex = i;
+      }
       const drawings = slide && slide.GetAllDrawings ? slide.GetAllDrawings() : [],
         shapes = [];
       for (let i = 0; i < drawings.length; i += 1) {
@@ -363,7 +368,27 @@
         }
         shapes.push({ index: i, text: text });
       }
-      return { ok: true, slideIndex: slideIndex, shapes: shapes };
+      // Each slide's title, so new slides can follow on from the rest of the deck.
+      const titles = [];
+      for (let i = 0; i < all.length && i < 60; i += 1) {
+        const list = all[i].GetAllShapes ? all[i].GetAllShapes() : [];
+        let title = "";
+        for (let j = 0; j < list.length && !title; j += 1) {
+          const ph = list[j].GetPlaceholder ? list[j].GetPlaceholder() : null,
+            type = ph && ph.GetType ? ph.GetType() : "";
+          if ((type === "title" || type === "ctrTitle") && list[j].GetDocContent) {
+            const c = list[j].GetDocContent();
+            title =
+              c && c.GetText
+                ? String(c.GetText() || "")
+                    .replace(/\s+/g, " ")
+                    .trim()
+                : "";
+          }
+        }
+        titles.push(title.slice(0, 100));
+      }
+      return { ok: true, slideIndex: slideIndex, shapes: shapes, titles: titles };
     });
     if (!result || !result.ok) throw new Error("Unable to read the current slide.");
     const selectedPreferred = actionId === "slides.improve" || String(actionId || "").indexOf("knowledge.") === 0;
@@ -377,6 +402,7 @@
       slideIndex: result.slideIndex,
       selectedText: selected || "",
       shapes: result.shapes || [],
+      deckTitles: result.titles || [],
       text:
         target === "selected_text"
           ? selected
@@ -838,46 +864,373 @@
       throw new Error((result && result.error) || "Only part of the slide was updated.");
     return { ok: true, changed: result.changed, target: snapshot.targetLabel, warnings: [] };
   };
-  host.createSlide = async function (slideData) {
-    const result = await host.dynamicCommand(function (input) {
-      const p = Api.GetPresentation();
-      if (!p || !p.AddSlide || !Api.CreateSlide) return { ok: false, error: "Adding slides is not supported." };
-      const current = p.GetCurrentVisibleSlide ? p.GetCurrentVisibleSlide() : p.GetCurrentSlide(),
-        slide = Api.CreateSlide();
-      if (!slide) return { ok: false, error: "A new slide could not be created." };
-      if (current && current.GetLayout && slide.SetLayout) {
-        const layout = current.GetLayout();
-        if (layout) slide.SetLayout(layout);
-      }
-      const added = p.AddSlide(slide);
-      if (added === false) return { ok: false, error: "Euro-Office rejected the new slide." };
-      function add(text, y, size) {
-        if (!Api.CreateShape || !slide.AddObject) return false;
-        const fill = Api.CreateNoFill(),
-          stroke = Api.CreateStroke(0, Api.CreateNoFill()),
-          shape = Api.CreateShape("rect", 8000000, size, fill, stroke);
-        shape.SetPosition(700000, y);
-        const c = shape.GetDocContent && shape.GetDocContent();
-        if (!c) return false;
-        if (c.RemoveAllElements) c.RemoveAllElements();
-        const lines = String(text).split(/\r?\n/);
-        for (let i = 0; i < lines.length; i += 1) {
-          const para = Api.CreateParagraph();
-          para.AddText(lines[i]);
-          if (c.Push) c.Push(para);
-          else if (c.AddElement) c.AddElement(i, para);
-          else return false;
+  // Adds slides after the current one. Each slide uses the deck's own layout for its kind (title, section, content or
+  // two columns), so it takes the deck's fonts, colours, bullets and positions, and Guiden supplies only the words.
+  // When the deck has no layout with the text areas a slide needs, its words go in text boxes drawn in the theme's text
+  // colour: a plain new shape draws white text, which disappears on a light background.
+  host.createSlides = async function (slides) {
+    const result = await host.dynamicCommand(
+      function (input) {
+        const p = Api.GetPresentation();
+        if (!p || !p.AddSlide || !Api.CreateSlide) return { ok: false, error: "Adding slides is not supported." };
+        const current = p.GetCurrentVisibleSlide ? p.GetCurrentVisibleSlide() : p.GetCurrentSlide(),
+          currentLayout = current && current.GetLayout ? current.GetLayout() : null,
+          master =
+            (currentLayout && currentLayout.GetMaster && currentLayout.GetMaster()) || (p.GetMaster && p.GetMaster(0));
+        const width = (p.GetWidth && p.GetWidth()) || 12192000,
+          height = (p.GetHeight && p.GetHeight()) || 6858000;
+        function role(drawing) {
+          const ph = drawing && drawing.GetPlaceholder ? drawing.GetPlaceholder() : null,
+            type = ph && ph.GetType ? String(ph.GetType()) : "";
+          if (type === "title" || type === "ctrTitle") return "title";
+          if (type === "subTitle") return "subtitle";
+          if (type === "body") return "body";
+          if (type === "unknown" || type === "obj") return "content";
+          return type ? "other" : "";
         }
-        slide.AddObject(shape);
-        return true;
-      }
-      if (!add(input.title, 500000, 1000000)) return { ok: false, error: "Slide text shapes are not supported." };
-      if (!add(input.bullets.map(x => "• " + x).join("\n"), 1700000, 3500000))
-        return { ok: false, error: "Slide body could not be created." };
-      return { ok: true, changed: 1 };
-    }, slideData);
-    if (!result || !result.ok) throw new Error((result && result.error) || "The new slide was not created.");
-    return { ok: true, changed: 1, target: "New slide", warnings: [] };
+        function count(layout) {
+          const r = { title: 0, centred: 0, subtitle: 0, body: 0, content: 0 },
+            shapes = layout && layout.GetAllShapes ? layout.GetAllShapes() : [];
+          for (let i = 0; i < shapes.length; i += 1) {
+            const k = role(shapes[i]),
+              ph = shapes[i].GetPlaceholder ? shapes[i].GetPlaceholder() : null;
+            if (k in r) r[k] += 1;
+            if (ph && ph.GetType && ph.GetType() === "ctrTitle") r.centred += 1;
+          }
+          return r;
+        }
+        const layouts = [];
+        if (master && master.GetLayoutsCount)
+          for (let i = 0; i < master.GetLayoutsCount(); i += 1) {
+            const layout = master.GetLayout(i),
+              name = layout && layout.GetName ? String(layout.GetName() || "") : "";
+            if (layout && !/vertical/i.test(name)) layouts.push({ layout: layout, name: name, has: count(layout) });
+          }
+        // A layout of the given OOXML type whose text areas pass test, else the first layout that passes. The type is
+        // only a hint: Euro-Office answers an unknown type with some other layout, and custom templates often have none.
+        function get(type, test) {
+          let layout = null;
+          try {
+            layout = master && master.GetLayoutByType ? master.GetLayoutByType(type) : null;
+          } catch (e) {
+            layout = null;
+          }
+          if (layout) {
+            const name = layout.GetName ? String(layout.GetName() || "") : "";
+            if (!/vertical/i.test(name) && test({ layout: layout, name: name, has: count(layout) })) return layout;
+          }
+          for (let i = 0; i < layouts.length; i += 1) if (test(layouts[i])) return layouts[i].layout;
+          return null;
+        }
+        const text = x => x.has.body + x.has.content;
+        const pick = {
+          title: () => get("title", x => x.has.title === 1 && (x.has.centred || x.has.subtitle) && text(x) <= 1),
+          section: () => get("secHead", x => x.has.title === 1 && !x.has.subtitle && !x.has.content && x.has.body <= 1),
+          content: () => get("obj", x => x.has.title === 1 && text(x) === 1 && !x.has.subtitle),
+          comparison: () => get("twoTxTwoObj", x => x.has.title === 1 && x.has.body === 2 && x.has.content === 2),
+          two: () => get("twoObj", x => x.has.title === 1 && text(x) === 2 && !x.has.subtitle),
+          titleOnly: () => get("titleOnly", x => x.has.title === 1 && !text(x) && !x.has.subtitle),
+          blank: () => get("blank", x => !x.has.title && !text(x) && !x.has.subtitle)
+        };
+        // A paragraph without a bullet, for a column heading inside a bulleted text area.
+        function noBullet(para) {
+          if (para.SetBullet && Api.CreateNumbering) para.SetBullet(Api.CreateNumbering("None"));
+        }
+        function setLines(shape, lines, heading) {
+          const c = shape && shape.GetDocContent ? shape.GetDocContent() : null;
+          if (!c || !c.RemoveAllElements) return false;
+          c.RemoveAllElements();
+          for (let i = 0; i < lines.length; i += 1) {
+            const para = Api.CreateParagraph(),
+              run = para.AddText(lines[i]);
+            if (heading && i === 0) {
+              if (run && run.SetBold) run.SetBold(true);
+              noBullet(para);
+            }
+            if (c.Push) c.Push(para);
+            else if (c.AddElement) c.AddElement(i, para);
+            else return false;
+          }
+          return true;
+        }
+        function textBox(slide, lines, box, options) {
+          if (!Api.CreateShape || !slide.AddObject) return false;
+          const shape = Api.CreateShape(
+            "rect",
+            box.w,
+            box.h,
+            Api.CreateNoFill(),
+            Api.CreateStroke(0, Api.CreateNoFill())
+          );
+          shape.SetPosition(box.x, box.y);
+          if (shape.SetVerticalTextAlign) shape.SetVerticalTextAlign(options.title ? "bottom" : "top");
+          const c = shape.GetDocContent && shape.GetDocContent();
+          if (!c) return false;
+          if (c.RemoveAllElements) c.RemoveAllElements();
+          for (let i = 0; i < lines.length; i += 1) {
+            const para = Api.CreateParagraph(),
+              run = para.AddText(lines[i]);
+            const heading = options.heading && i === 0;
+            if (para.SetJc) para.SetJc("left");
+            if (options.bullets && !heading && para.SetBullet && Api.CreateBullet) {
+              para.SetBullet(Api.CreateBullet("•"));
+              // A hanging indent puts the text a tab after the bullet (twips).
+              if (para.SetIndLeft) para.SetIndLeft(360);
+              if (para.SetIndFirstLine) para.SetIndFirstLine(-360);
+            }
+            if (run && run.SetFill && Api.CreateSolidFill && Api.CreateSchemeColor)
+              run.SetFill(Api.CreateSolidFill(Api.CreateSchemeColor("tx1")));
+            if (run && run.SetFontSize) run.SetFontSize(options.size);
+            if (run && (options.title || heading) && run.SetBold) run.SetBold(true);
+            if (c.Push) c.Push(para);
+            else if (c.AddElement) c.AddElement(i, para);
+            else return false;
+          }
+          slide.AddObject(shape);
+          return true;
+        }
+        function byX(a, b) {
+          return (a.GetPosX ? a.GetPosX() : 0) - (b.GetPosX ? b.GetPosX() : 0);
+        }
+        function side(part) {
+          return { heading: String((part && part.heading) || ""), bullets: (part && part.bullets) || [] };
+        }
+        const margin = Math.round(width * 0.06),
+          titleBox = { x: margin, y: Math.round(height * 0.06), w: width - 2 * margin, h: Math.round(height * 0.17) },
+          bodyBox = { x: margin, y: Math.round(height * 0.27), w: width - 2 * margin, h: Math.round(height * 0.65) };
+        let at = current && current.GetSlideIndex ? current.GetSlideIndex() + 1 : -1,
+          made = 0,
+          boxes = 0;
+        for (let n = 0; n < input.slides.length; n += 1) {
+          const spec = input.slides[n],
+            left = side(spec.left),
+            right = side(spec.right),
+            headings = Boolean(left.heading || right.heading);
+          let layout =
+            spec.layout === "title"
+              ? pick.title() || pick.section()
+              : spec.layout === "section"
+                ? pick.section() || pick.title()
+                : spec.layout === "two"
+                  ? (headings && pick.comparison()) || pick.two() || pick.comparison()
+                  : pick.content();
+          layout = layout || pick.titleOnly() || pick.blank();
+          const slide = Api.CreateSlide();
+          if (!slide) return { ok: false, changed: made, error: "A new slide could not be created." };
+          if (layout && slide.ApplyLayout) slide.ApplyLayout(layout);
+          if (p.AddSlide(slide) === false)
+            return { ok: false, changed: made, error: "Euro-Office rejected the new slide." };
+          if (at >= 0 && slide.MoveTo) {
+            slide.MoveTo(at);
+            at += 1;
+          }
+          const shapes = slide.GetAllShapes ? slide.GetAllShapes() : [],
+            found = { title: [], subtitle: [], body: [], content: [] };
+          for (let i = 0; i < shapes.length; i += 1) {
+            const k = role(shapes[i]);
+            if (k in found) found[k].push(shapes[i]);
+          }
+          found.body.sort(byX);
+          found.content.sort(byX);
+          const used = [];
+          function put(shape, lines, heading) {
+            if (!shape || !lines.length) return false;
+            if (!setLines(shape, lines, heading)) return false;
+            used.push(shape);
+            return true;
+          }
+          const title = String(spec.title || "");
+          if (!put(found.title[0], [title])) {
+            if (!textBox(slide, [title], titleBox, { title: true, size: 64 }))
+              return { ok: false, changed: made, error: "Slide text areas are not supported." };
+            boxes += 1;
+          }
+          const sub = String(spec.subtitle || "");
+          if (spec.layout === "title" || spec.layout === "section") {
+            if (sub && !put(found.subtitle[0], [sub]) && !put(found.body[0], [sub]) && !put(found.content[0], [sub])) {
+              textBox(slide, [sub], bodyBox, { size: 40 });
+              boxes += 1;
+            }
+          } else if (spec.layout === "two") {
+            const areas = found.content.length >= 2 ? found.content : found.content.concat(found.body);
+            const comparison = found.body.length >= 2 && found.content.length >= 2;
+            [left, right].forEach(function (part, i) {
+              const lines = part.bullets.slice();
+              let ok = false;
+              if (comparison) {
+                ok = put(found.content[i], lines);
+                if (ok && part.heading) put(found.body[i], [part.heading]);
+              } else {
+                ok = put(areas[i], part.heading ? [part.heading].concat(lines) : lines, Boolean(part.heading));
+              }
+              if (!ok) {
+                const half = Math.round((bodyBox.w - margin / 2) / 2);
+                textBox(
+                  slide,
+                  part.heading ? [part.heading].concat(lines) : lines,
+                  { x: bodyBox.x + i * (half + Math.round(margin / 2)), y: bodyBox.y, w: half, h: bodyBox.h },
+                  { bullets: true, heading: Boolean(part.heading), size: 40 }
+                );
+                boxes += 1;
+              }
+            });
+          } else {
+            const lines = (spec.bullets || []).slice();
+            if (!put(found.content[0], lines) && !put(found.body[0], lines)) {
+              textBox(slide, lines, bodyBox, { bullets: true, size: 40 });
+              boxes += 1;
+            }
+          }
+          // Empty text areas left from the layout would show "Click to add text" prompts.
+          for (let i = 0; i < shapes.length; i += 1) {
+            const k = role(shapes[i]);
+            if (k && k !== "other" && used.indexOf(shapes[i]) < 0 && shapes[i].Delete) shapes[i].Delete();
+          }
+          made += 1;
+        }
+        // A deck still on the editor's default theme gets a hint to try Design deck.
+        let plain = false;
+        try {
+          const json = JSON.parse(master.GetTheme().GetColorScheme().ToJSON()),
+            a = json.accent1 && json.accent1.color && json.accent1.color.rgba,
+            hex = a ? ((1 << 24) + (a.red << 16) + (a.green << 8) + a.blue).toString(16).slice(1).toUpperCase() : "";
+          plain =
+            /^office/i.test(String(json.name || "")) || ["4F81BD", "4472C4", "156082", "5B9BD5"].indexOf(hex) >= 0;
+        } catch (e) {}
+        return { ok: true, changed: made, textBoxes: boxes, plain: plain };
+      },
+      { slides }
+    );
+    if (!result || !result.ok) throw new Error((result && result.error) || "The new slides were not created.");
+    const warnings = result.textBoxes ? ["This deck has no matching layout, so some text went into text boxes."] : [];
+    return {
+      ok: true,
+      changed: result.changed,
+      target: result.changed === 1 ? "New slide" : result.changed + " new slides",
+      plainDesign: Boolean(result.plain),
+      warnings
+    };
+  };
+  // Gives the whole deck one of the ready-made designs: theme colours and fonts on every slide master (so slides,
+  // layouts, tables and charts all follow), the master background, and accent bars at the slide edges. The accents
+  // are named "Guiden design", so a later design replaces them instead of piling up.
+  host.applyDesign = async function (design) {
+    if (!design) throw new Error("Choose a design first.");
+    const result = await host.dynamicCommand(
+      function (input) {
+        const d = input.design,
+          p = Api.GetPresentation();
+        if (!p || !Api.CreateThemeColorScheme || !Api.CreateThemeFontScheme || !p.GetMaster)
+          return { ok: false, error: "Designs are not supported by this Euro-Office build." };
+        // Euro-Office takes a scheme's twelve colours in this order.
+        const order = ["accent1", "accent2", "accent3", "accent4", "accent5", "accent6"].concat([
+          "dk1",
+          "dk2",
+          "folHlink",
+          "hlink",
+          "lt1",
+          "lt2"
+        ]);
+        const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+        function scheme() {
+          const made = Api.CreateThemeColorScheme(
+            order.map(k => {
+              const c = hex(d.colors[k]);
+              return Api.CreateRGBColor(c[0], c[1], c[2]);
+            }),
+            "Guiden " + d.name
+          );
+          // Check the order took: a build that orders them differently would give white text on white.
+          try {
+            const json = JSON.parse(made.ToJSON());
+            const same = k => {
+              const got = json[k] && json[k].color && json[k].color.rgba,
+                want = hex(d.colors[k]);
+              return !got || (got.red === want[0] && got.green === want[1] && got.blue === want[2]);
+            };
+            if (!same("dk1") || !same("lt1") || !same("accent1")) return null;
+          } catch (e) {}
+          return made;
+        }
+        const masters = [];
+        if (p.GetAllSlideMasters) masters.push.apply(masters, p.GetAllSlideMasters());
+        else for (let i = 0; i < (p.GetMastersCount ? p.GetMastersCount() : 1); i += 1) masters.push(p.GetMaster(i));
+        const width = (p.GetWidth && p.GetWidth()) || 12192000,
+          height = (p.GetHeight && p.GetHeight()) || 6858000;
+        function bar(owner, w, h, x, y, color, name) {
+          const shape = Api.CreateShape(
+            "rect",
+            w,
+            h,
+            Api.CreateSolidFill(Api.CreateSchemeColor(color)),
+            Api.CreateStroke(0, Api.CreateNoFill())
+          );
+          shape.SetPosition(x, y);
+          if (shape.SetName) shape.SetName("Guiden design " + name);
+          owner.AddObject(shape);
+        }
+        function clear(owner) {
+          const shapes = owner && owner.GetAllShapes ? owner.GetAllShapes() : [];
+          for (let i = 0; i < shapes.length; i += 1)
+            if (shapes[i].GetName && /^Guiden design/.test(String(shapes[i].GetName() || "")) && shapes[i].Delete)
+              shapes[i].Delete();
+        }
+        let done = 0;
+        for (let m = 0; m < masters.length; m += 1) {
+          const master = masters[m],
+            theme = master && master.GetTheme ? master.GetTheme() : null;
+          if (!theme || !theme.SetColorScheme || !theme.SetFontScheme) continue;
+          const colors = scheme();
+          if (!colors) return { ok: false, error: "This Euro-Office build orders theme colours differently." };
+          theme.SetColorScheme(colors);
+          theme.SetFontScheme(
+            Api.CreateThemeFontScheme(
+              d.fonts.heading,
+              d.fonts.heading,
+              d.fonts.heading,
+              d.fonts.body,
+              d.fonts.body,
+              d.fonts.body,
+              "Guiden " + d.name
+            )
+          );
+          if (master.SetBackground) master.SetBackground(Api.CreateSolidFill(Api.CreateSchemeColor("bg1")));
+          clear(master);
+          const layouts = master.GetAllLayouts ? master.GetAllLayouts() : [];
+          for (let i = 0; i < layouts.length; i += 1) clear(layouts[i]);
+          if (Api.CreateShape && master.AddObject) {
+            bar(master, width, Math.round(height * 0.014), 0, 0, "accent1", "top");
+            bar(
+              master,
+              Math.round(width * 0.05),
+              Math.round(height * 0.008),
+              Math.round(width * 0.06),
+              Math.round(height * 0.93),
+              "accent2",
+              "foot"
+            );
+            // Title and section slides get a band down the left edge.
+            for (let i = 0; i < layouts.length; i += 1) {
+              const name = layouts[i].GetName ? String(layouts[i].GetName() || "") : "",
+                shapes = layouts[i].GetAllShapes ? layouts[i].GetAllShapes() : [];
+              let opening = /section/i.test(name);
+              for (let j = 0; j < shapes.length; j += 1) {
+                const ph = shapes[j].GetPlaceholder ? shapes[j].GetPlaceholder() : null;
+                if (ph && ph.GetType && ph.GetType() === "ctrTitle") opening = true;
+              }
+              if (opening && layouts[i].AddObject)
+                bar(layouts[i], Math.round(width * 0.025), height, 0, 0, "accent1", "band");
+            }
+          }
+          done += 1;
+        }
+        if (!done) return { ok: false, error: "This presentation has no theme Guiden can change." };
+        return { ok: true, changed: done };
+      },
+      { design }
+    );
+    if (!result || !result.ok) throw new Error((result && result.error) || "The design was not applied.");
+    return { ok: true, changed: 1, target: design.name + " design", warnings: [] };
   };
   host.addNotes = async function (text, snapshot) {
     const result = await host.dynamicCommand(

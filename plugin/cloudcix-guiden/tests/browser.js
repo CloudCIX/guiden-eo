@@ -52,7 +52,7 @@ window.Api = {
 window.Asc = {
   scope: {},
   plugin: {
-    info: { editorType: "word", options: setup.options || {} },
+    info: { editorType: setup.editorType || "word", options: setup.options || {} },
     theme: setup.theme,
     windowID: setup.window ? "w1" : undefined,
     events: {},
@@ -67,7 +67,45 @@ window.Asc = {
     callCommand(fn, _close, _recalc, callback) { const value = new Function("return (" + String(fn) + ")();")(); setTimeout(() => callback && callback(value), 0); }
   }
 };
-window.emit = (name, data) => window.Asc.plugin.events[name](data);`;
+window.emit = (name, data) => window.Asc.plugin.events[name](data);
+if (setup.editorType === "slide") {
+  // A one-slide presentation on the default theme, with the usual layouts.
+  const content = () => ({ paras: [], RemoveAllElements() { this.paras = []; }, Push(p) { this.paras.push(p.text); },
+    GetText() { return this.paras.join("\\n"); } });
+  const shape = (type, text) => { const c = content(); if (text) c.paras.push(text);
+    return { GetPlaceholder: () => (type ? { GetType: () => type } : null), GetDocContent: () => c, GetPosX: () => 0, GetName: () => "",
+      Delete() { this.deleted = true; } }; };
+  const layout = (name, types) => ({ GetName: () => name, GetAllShapes: () => types.map(t => shape(t)), GetMaster: () => master, types });
+  const layouts = [layout("Title Slide", ["ctrTitle", "subTitle"]), layout("Title and Content", ["title", "unknown"]), layout("Blank", [])];
+  const theme = { GetColorScheme: () => ({ ToJSON: () => JSON.stringify({ name: "Office", accent1: { color: { rgba: { red: 79, green: 129, blue: 189 } } } }) }),
+    SetColorScheme(c) { window.editorCalls.push(["SetColorScheme", c.name]); return true; },
+    SetFontScheme(f) { window.editorCalls.push(["SetFontScheme", f[0], f[3]]); return true; } };
+  const master = { GetLayoutsCount: () => layouts.length, GetLayout: i => layouts[i], GetAllLayouts: () => layouts, GetTheme: () => theme,
+    GetLayoutByType: () => layouts[1], GetAllShapes: () => [], SetBackground() {}, AddObject(s) { window.editorCalls.push(["AddDesignShape", s.name]); } };
+  const slide = l => ({ layout: l, shapes: l.types.map(t => shape(t)), GetLayout() { return this.layout; }, GetAllShapes() { return this.shapes; },
+    GetAllDrawings() { return this.shapes; }, ApplyLayout(x) { this.layout = x; this.shapes = x.types.map(t => shape(t)); return true; },
+    GetSlideIndex() { return slides.indexOf(this); }, MoveTo(i) { slides.splice(slides.indexOf(this), 1); slides.splice(i, 0, this); window.editorCalls.push(["MoveTo", i]); return true; },
+    AddObject(s) { this.shapes.push(s); } });
+  const slides = [slide(layouts[1])];
+  slides[0].shapes[0].GetDocContent().paras.push("Roadmap");
+  slides[0].shapes[1].GetDocContent().paras.push("Launch the platform");
+  window.slides = slides;
+  // Like the editor, a slide that is added becomes the current one.
+  let current = slides[0];
+  const presentation = { GetCurrentVisibleSlide: () => current, GetCurrentSlide: () => current, GetAllSlides: () => slides, GetMaster: () => master,
+    GetAllSlideMasters: () => [master], GetWidth: () => 12192000, GetHeight: () => 6858000,
+    AddSlide(x) { slides.push(x); current = x; window.editorCalls.push(["AddSlide", x.layout.GetName()]); return true; } };
+  Object.assign(window.Api, {
+    GetPresentation: () => presentation,
+    CreateSlide: () => slide(layouts[0]),
+    CreateParagraph: () => ({ text: "", AddText(t) { this.text += t; return { SetBold() {} }; }, SetBullet() {} }),
+    CreateRGBColor: (r, g, b) => [r, g, b],
+    CreateThemeColorScheme: (colors, name) => ({ name, ToJSON: () => "{}" }),
+    CreateThemeFontScheme: (...fonts) => fonts,
+    CreateSchemeColor: n => n, CreateSolidFill: c => c, CreateNoFill: () => ({}), CreateStroke: () => ({}),
+    CreateShape: () => ({ SetPosition() {}, SetName(n) { this.name = n; } })
+  });
+}`;
 
 function sse(events, done) {
   return events.map(e => "data: " + JSON.stringify(e) + "\n\n").join("") + (done === false ? "" : "data: [DONE]\n\n");
@@ -443,10 +481,11 @@ test("Up and Down in the instruction box step through earlier instructions", asy
     await t.page.focus("#prompt");
     await t.page.keyboard.press("ArrowUp");
     assert.strictEqual(await t.page.inputValue("#prompt"), "second question");
-    await t.page.keyboard.press("Home");
+    // Place the caret directly: on macOS, Home and End scroll instead of moving it.
+    await t.page.$eval("#prompt", el => el.setSelectionRange(0, 0));
     await t.page.keyboard.press("ArrowUp");
     assert.strictEqual(await t.page.inputValue("#prompt"), "first question");
-    await t.page.keyboard.press("End");
+    await t.page.$eval("#prompt", el => el.setSelectionRange(el.value.length, el.value.length));
     await t.page.keyboard.press("ArrowDown");
     assert.strictEqual(await t.page.inputValue("#prompt"), "second question");
   } finally {
@@ -542,6 +581,96 @@ test("one-click actions follow the selection and run straight away", async () =>
     assert.strictEqual(t.requests.length, 2, "Draft waits for an instruction");
     assert.strictEqual(await t.page.evaluate(() => document.activeElement.id), "prompt");
     await t.page.waitForFunction(() => document.getElementById("contextText").textContent === "At the cursor");
+    assert.deepStrictEqual(t.errors, []);
+  } finally {
+    await t.close();
+  }
+});
+
+test("the API key boxes are masked text, so password managers leave the instruction box alone", async () => {
+  const t = await open({}, "");
+  try {
+    assert.strictEqual(await t.page.$$eval('input[type="password"]', els => els.length), 0);
+    for (const id of ["connectKey", "apiKey"]) {
+      const masked = await t.page.$eval("#" + id, el => getComputedStyle(el).webkitTextSecurity);
+      assert.strictEqual(masked, "disc", id + " is drawn as dots");
+    }
+    assert.strictEqual(await t.page.$eval("#prompt", el => el.hasAttribute("data-1p-ignore")), true);
+    assert.deepStrictEqual(t.errors, []);
+  } finally {
+    await t.close();
+  }
+});
+
+test("New slide previews each slide with its layout and adds them after the current slide", async () => {
+  const reply = sse([
+    delta(
+      JSON.stringify({
+        slides: [
+          { layout: "title", title: "High Performance Computing", subtitle: "An introduction" },
+          { layout: "content", title: "What it offers", bullets: ["• Compute for research", "Notebooks"] }
+        ]
+      })
+    )
+  ]);
+  const t = await open(Object.assign({ editorType: "slide" }, typedKey), reply);
+  try {
+    await t.page.click('#quickBar button[data-command="slide.new"]');
+    await generate(t.page, "Introduction slides for a talk on HPC");
+    assert.match(
+      t.requests[0].body.messages.map(m => m.content).join("\n"),
+      /Slides in this presentation \(titles\):\n1\. Roadmap/,
+      "the model sees the deck's slide titles"
+    );
+    const cards = await t.page.$$eval("#preview .slide-card", els =>
+      els.map(el => [el.querySelector(".slide-tag").textContent, el.querySelector("h2").textContent])
+    );
+    assert.deepStrictEqual(cards, [
+      ["1 · Title slide", "High Performance Computing"],
+      ["2 · Title and bullets", "What it offers"]
+    ]);
+    assert.strictEqual(await text(t.page, "#preview .slide-card li"), "Compute for research");
+    assert.strictEqual(await text(t.page, "#apply"), "Create 2 slides");
+    await t.page.click("#apply");
+    await idle(t.page);
+    const calls = await t.page.evaluate(() => window.editorCalls.filter(c => c[0] === "AddSlide" || c[0] === "MoveTo"));
+    assert.deepStrictEqual(calls, [
+      ["AddSlide", "Title Slide"],
+      ["MoveTo", 1],
+      ["AddSlide", "Title and Content"],
+      ["MoveTo", 2]
+    ]);
+    assert.match(await text(t.page, "#status"), /Created 2 new slides\. This deck has the plain default design/);
+    assert.strictEqual(await text(t.page, "#contextText"), "Slide 3 · 2 text areas", "the panel follows the new slide");
+    assert.deepStrictEqual(t.errors, []);
+  } finally {
+    await t.close();
+  }
+});
+
+test("Design deck runs in one click, can switch design without asking again, and applies it", async () => {
+  const reply = sse([delta(JSON.stringify({ design: "midnight", reason: "A dark look suits a tech talk." }))]);
+  const t = await open(Object.assign({ editorType: "slide" }, typedKey), reply);
+  try {
+    await t.page.click('#quickBar button[data-command="slide.design"]');
+    await idle(t.page);
+    assert.strictEqual(t.requests.length, 1);
+    assert.strictEqual(await text(t.page, "#preview .design-title"), "Midnight");
+    assert.strictEqual(await text(t.page, "#preview .design-reason"), "A dark look suits a tech talk.");
+    assert.strictEqual(await text(t.page, "#apply"), "Apply design");
+    await t.page.click('#preview button[data-design="paper"]');
+    assert.strictEqual(await text(t.page, "#preview .design-title"), "Paper");
+    assert.strictEqual(await t.page.$$eval("#preview .design-reason", els => els.length), 0);
+    assert.strictEqual(t.requests.length, 1, "switching design needs no new request");
+    await t.page.click("#apply");
+    await idle(t.page);
+    const calls = await t.page.evaluate(() => window.editorCalls.filter(c => /Scheme|DesignShape/.test(c[0])));
+    assert.deepStrictEqual(calls.slice(0, 2), [
+      ["SetColorScheme", "Guiden Paper"],
+      ["SetFontScheme", "Caladea", "Carlito"]
+    ]);
+    assert(calls.some(c => c[1] === "Guiden design top"));
+    assert.match(await text(t.page, "#status"), /Applied the Paper design to every slide/);
     assert.deepStrictEqual(t.errors, []);
   } finally {
     await t.close();
