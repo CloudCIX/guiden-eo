@@ -4,16 +4,16 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>CloudCIX Guiden®</title>
-    <link rel="stylesheet" href="styles/main.css?v=2.5.0" />
+    <link rel="stylesheet" href="styles/main.css?v=2.5.1" />
     <script src="../v1/plugins.js"></script>
-    <script defer src="scripts/core.js?v=2.5.0"></script>
-    <script defer src="scripts/host.js?v=2.5.0"></script>
-    <script defer src="scripts/api.js?v=2.5.0"></script>
-    <script defer src="scripts/writer.js?v=2.5.0"></script>
-    <script defer src="scripts/cells.js?v=2.5.0"></script>
-    <script defer src="scripts/slides.js?v=2.5.0"></script>
-    <script defer src="scripts/menus.js?v=2.5.0"></script>
-    <script defer src="scripts/app.js?v=2.5.0"></script>
+    <script defer src="scripts/core.js?v=2.5.1"></script>
+    <script defer src="scripts/host.js?v=2.5.1"></script>
+    <script defer src="scripts/api.js?v=2.5.1"></script>
+    <script defer src="scripts/writer.js?v=2.5.1"></script>
+    <script defer src="scripts/cells.js?v=2.5.1"></script>
+    <script defer src="scripts/slides.js?v=2.5.1"></script>
+    <script defer src="scripts/menus.js?v=2.5.1"></script>
+    <script defer src="scripts/app.js?v=2.5.1"></script>
   </head>
   <body>
     <main class="shell">
@@ -81,16 +81,19 @@
             ><button type="button" data-refine="Use simpler words and shorter sentences.">Simpler</button>
           </div>
           <div class="refine-input">
-            <input
+            <div
               id="refineText"
-              type="text"
-              autocomplete="off"
+              class="text-box"
+              role="textbox"
+              aria-label="Follow-up for Guiden"
+              contenteditable="plaintext-only"
               data-1p-ignore
               data-lpignore="true"
               data-bwignore="true"
               data-form-type="other"
-              placeholder="Ask Guiden to change this…"
-            /><button id="refineSend" type="button" aria-label="Send" title="Send">→</button>
+              data-placeholder="Ask Guiden to change this…"
+            ></div>
+            <button id="refineSend" type="button" aria-label="Send" title="Send">→</button>
           </div>
         </div>
         <label class="remember track-option" id="trackOption" hidden
@@ -116,18 +119,21 @@
           </div>
         </details>
         <div class="instruction-block">
-          <label for="prompt" id="promptLabel">What would you like to know?</label
-          ><button id="clear" class="link-button clear-prompt" type="button">Clear</button
-          ><textarea
+          <label id="promptLabel">What would you like to know?</label
+          ><button id="clear" class="link-button clear-prompt" type="button">Clear</button>
+          <div
             id="prompt"
-            rows="3"
-            autocomplete="off"
+            class="text-box"
+            role="textbox"
+            aria-multiline="true"
+            aria-labelledby="promptLabel"
+            contenteditable="plaintext-only"
             data-1p-ignore
             data-lpignore="true"
             data-bwignore="true"
             data-form-type="other"
-            placeholder="Ask a question about the current selection."
-          ></textarea>
+            data-placeholder="Ask a question about the current selection."
+          ></div>
           <div class="prompt-hint" id="promptHint">Read-only: your file won't change.</div>
         </div>
         <details class="output-options" id="outputOptions">
