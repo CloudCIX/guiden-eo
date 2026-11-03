@@ -481,10 +481,11 @@ test("Up and Down in the instruction box step through earlier instructions", asy
     await t.page.focus("#prompt");
     await t.page.keyboard.press("ArrowUp");
     assert.strictEqual(await t.page.inputValue("#prompt"), "second question");
-    await t.page.keyboard.press("Home");
+    // Place the caret directly: on macOS, Home and End scroll instead of moving it.
+    await t.page.$eval("#prompt", el => el.setSelectionRange(0, 0));
     await t.page.keyboard.press("ArrowUp");
     assert.strictEqual(await t.page.inputValue("#prompt"), "first question");
-    await t.page.keyboard.press("End");
+    await t.page.$eval("#prompt", el => el.setSelectionRange(el.value.length, el.value.length));
     await t.page.keyboard.press("ArrowDown");
     assert.strictEqual(await t.page.inputValue("#prompt"), "second question");
   } finally {
