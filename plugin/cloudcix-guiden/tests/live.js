@@ -332,6 +332,61 @@ const cases = [
       assert(!AMERICAN.test(notes), "American spelling: " + notes);
       return { words: words(notes), notes };
     }
+  },
+  {
+    name: "Slides New slide for a talk opening",
+    actionId: "slides.new",
+    instruction: "Introduction slide for a talk on HPC",
+    snapshot: Object.assign(slide("slides.new", ["", ""]), { deckTitles: [""] }),
+    check(result) {
+      const slides = result.slides;
+      assert(slides.length === 1, "asked for one slide, got " + slides.length);
+      assert(["title", "section", "content"].includes(slides[0].layout), "odd layout: " + slides[0].layout);
+      assert(slides[0].title.split(/\s+/).length <= 10, "long title: " + slides[0].title);
+      assert(
+        /HPC|high[- ]performance/i.test(slides[0].title + " " + slides[0].subtitle),
+        "off topic: " + slides[0].title
+      );
+      return { slides };
+    }
+  },
+  {
+    name: "Slides New slides for a short deck",
+    actionId: "slides.new",
+    instruction:
+      "Three slides introducing our HPC service: an opening slide, what it offers, and cloud versus physical nodes.",
+    snapshot: Object.assign(slide("slides.new", ["Boole HPC", "Compute for research and education"]), {
+      deckTitles: ["Boole HPC"]
+    }),
+    check(result) {
+      const slides = result.slides;
+      assert(slides.length === 3, "asked for three slides, got " + slides.length);
+      assert.strictEqual(slides[0].layout, "title", "the opening slide should be a title slide");
+      assert(
+        slides.some(s => s.layout === "two"),
+        "cloud versus physical should be two columns"
+      );
+      slides.forEach(s =>
+        (s.bullets || []).concat(s.left ? s.left.bullets : [], s.right ? s.right.bullets : []).forEach(b => {
+          assert(b.split(/\s+/).length <= 14, "long bullet: " + b);
+          assert(!/[.]$/.test(b), "full stop on a bullet: " + b);
+        })
+      );
+      return { slides };
+    }
+  },
+  {
+    name: "Slides Design deck follows a requested mood",
+    actionId: "slides.design",
+    instruction: "Something dark and dramatic for a keynote",
+    snapshot: Object.assign(slide("slides.design", ["Launching Boole HPC", "Keynote"]), {
+      deckTitles: ["Launching Boole HPC"]
+    }),
+    check(result) {
+      assert.strictEqual(result.design, "midnight", "chose " + result.design);
+      assert(result.reason, "no reason given");
+      return result;
+    }
   }
 ];
 

@@ -415,13 +415,27 @@
     if (p.kind === "comments") (p.comments || []).forEach(c => lines.push("“" + c.quote + "”: " + c.comment));
     if (p.kind === "formula") lines.push(p.formula);
     if (p.kind === "notes") lines.push(p.notes);
-    if (p.kind === "new-slide") lines.push(p.title, ...p.bullets.map(b => "• " + b));
+    if (p.kind === "new-slides")
+      (p.slides || []).forEach(slide => {
+        lines.push(slide.title);
+        if (slide.subtitle) lines.push(slide.subtitle);
+        (slide.bullets || []).forEach(b => lines.push("• " + b));
+        [slide.left, slide.right].forEach(part => {
+          if (!part) return;
+          if (part.heading) lines.push(part.heading);
+          part.bullets.forEach(b => lines.push("• " + b));
+        });
+      });
     if (p.kind === "outline") {
       lines.push(p.answer);
       (p.slides || []).forEach((s, i) => {
         lines.push(i + 1 + ". " + (s.title || "Untitled"));
         (s.bullets || []).forEach(b => lines.push("• " + b));
       });
+    }
+    if (p.kind === "design") {
+      const d = (p.designs || []).filter(x => x.id === p.design)[0];
+      lines.push((d ? d.name : p.design) + (p.reason ? ": " + p.reason : ""));
     }
     if (p.kind === "new-column") lines.push([p.header].concat(p.values).join("\n"));
     if (p.kind === "table" || (p.kind === "analysis" && Array.isArray(p.table) && p.table.length))

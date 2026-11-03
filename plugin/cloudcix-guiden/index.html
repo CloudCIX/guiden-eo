@@ -4,16 +4,16 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>CloudCIX Guiden®</title>
-    <link rel="stylesheet" href="styles/main.css?v=2.4.0" />
+    <link rel="stylesheet" href="styles/main.css?v=2.5.0" />
     <script src="../v1/plugins.js"></script>
-    <script defer src="scripts/core.js?v=2.4.0"></script>
-    <script defer src="scripts/host.js?v=2.4.0"></script>
-    <script defer src="scripts/api.js?v=2.4.0"></script>
-    <script defer src="scripts/writer.js?v=2.4.0"></script>
-    <script defer src="scripts/cells.js?v=2.4.0"></script>
-    <script defer src="scripts/slides.js?v=2.4.0"></script>
-    <script defer src="scripts/menus.js?v=2.4.0"></script>
-    <script defer src="scripts/app.js?v=2.4.0"></script>
+    <script defer src="scripts/core.js?v=2.5.0"></script>
+    <script defer src="scripts/host.js?v=2.5.0"></script>
+    <script defer src="scripts/api.js?v=2.5.0"></script>
+    <script defer src="scripts/writer.js?v=2.5.0"></script>
+    <script defer src="scripts/cells.js?v=2.5.0"></script>
+    <script defer src="scripts/slides.js?v=2.5.0"></script>
+    <script defer src="scripts/menus.js?v=2.5.0"></script>
+    <script defer src="scripts/app.js?v=2.5.0"></script>
   </head>
   <body>
     <main class="shell">
@@ -43,7 +43,19 @@
           Paste your CloudCIX API key to start. Guiden checks it once and remembers it on this browser.
         </p>
         <label class="field"
-          ><span>CloudCIX API key</span><input id="connectKey" type="password" autocomplete="off"
+          ><span>CloudCIX API key</span
+          ><input
+            id="connectKey"
+            class="secret"
+            type="text"
+            autocomplete="off"
+            autocapitalize="off"
+            autocorrect="off"
+            spellcheck="false"
+            data-1p-ignore
+            data-lpignore="true"
+            data-bwignore="true"
+            data-form-type="other"
         /></label>
         <label class="remember"><input id="connectRemember" type="checkbox" checked /> Remember on this browser</label>
         <div class="actions"><button id="connectButton" class="primary" type="button">Connect</button></div>
@@ -69,14 +81,16 @@
             ><button type="button" data-refine="Use simpler words and shorter sentences.">Simpler</button>
           </div>
           <div class="refine-input">
-            <input id="refineText" type="text" autocomplete="off" placeholder="Ask Guiden to change this…" /><button
-              id="refineSend"
-              type="button"
-              aria-label="Send"
-              title="Send"
-            >
-              →
-            </button>
+            <input
+              id="refineText"
+              type="text"
+              autocomplete="off"
+              data-1p-ignore
+              data-lpignore="true"
+              data-bwignore="true"
+              data-form-type="other"
+              placeholder="Ask Guiden to change this…"
+            /><button id="refineSend" type="button" aria-label="Send" title="Send">→</button>
           </div>
         </div>
         <label class="remember track-option" id="trackOption" hidden
@@ -108,6 +122,10 @@
             id="prompt"
             rows="3"
             autocomplete="off"
+            data-1p-ignore
+            data-lpignore="true"
+            data-bwignore="true"
+            data-form-type="other"
             placeholder="Ask a question about the current selection."
           ></textarea>
           <div class="prompt-hint" id="promptHint">Read-only: your file won't change.</div>
@@ -188,7 +206,19 @@
             Your CloudCIX account provides the API key for this editor.
           </p>
           <label class="field" id="apiKeyField"
-            ><span>CloudCIX API key</span><input id="apiKey" type="password" autocomplete="off" /></label
+            ><span>CloudCIX API key</span
+            ><input
+              id="apiKey"
+              class="secret"
+              type="text"
+              autocomplete="off"
+              autocapitalize="off"
+              autocorrect="off"
+              spellcheck="false"
+              data-1p-ignore
+              data-lpignore="true"
+              data-bwignore="true"
+              data-form-type="other" /></label
           ><label class="remember" id="rememberKeyField"
             ><input id="rememberKey" type="checkbox" /> Remember key on this browser</label
           >

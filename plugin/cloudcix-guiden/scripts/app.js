@@ -996,14 +996,41 @@
             )
             .join("")
       );
-    if (preview.kind === "new-slide")
+    if (preview.kind === "new-slides") {
+      const names = { title: "Title slide", section: "Section", content: "Title and bullets", two: "Two columns" },
+        list = items => "<ul>" + items.map(x => "<li>" + C.escapeHtml(x) + "</li>").join("") + "</ul>",
+        column = part =>
+          '<div class="slide-col">' +
+          (part.heading ? "<strong>" + C.escapeHtml(part.heading) + "</strong>" : "") +
+          list(part.bullets) +
+          "</div>";
       parts.push(
-        '<div class="slide-preview"><h2>' +
-          C.escapeHtml(preview.title) +
-          "</h2><ul>" +
-          preview.bullets.map(x => "<li>" + C.escapeHtml(x) + "</li>").join("") +
-          "</ul></div>"
+        '<div class="diff-label">Uses this deck\'s own layouts, fonts and colours</div>' +
+          preview.slides
+            .map(
+              (slide, i) =>
+                '<div class="slide-card slide-' +
+                slide.layout +
+                '"><div class="slide-tag">' +
+                (preview.slides.length > 1 ? i + 1 + " · " : "") +
+                names[slide.layout] +
+                "</div><h2>" +
+                C.escapeHtml(slide.title) +
+                "</h2>" +
+                (slide.subtitle && (slide.layout === "title" || slide.layout === "section")
+                  ? '<p class="slide-sub">' + C.escapeHtml(slide.subtitle) + "</p>"
+                  : "") +
+                (slide.layout === "two"
+                  ? '<div class="slide-cols">' + column(slide.left) + column(slide.right) + "</div>"
+                  : slide.bullets.length
+                    ? list(slide.bullets)
+                    : "") +
+                "</div>"
+            )
+            .join("")
       );
+    }
+    if (preview.kind === "design") parts.push(designHtml(preview));
     if (preview.kind === "outline")
       parts.push(
         textHtml(preview.answer) +
@@ -1025,6 +1052,66 @@
     markPlaceholders($("preview"));
     renderSources(preview.sources || [], preview.provenanceUnavailable);
   }
+  // The chosen design as a small slide in its own colours and fonts, with the other designs to switch to.
+  function designHtml(preview) {
+    const font = name =>
+      /caladea|serif/i.test(name)
+        ? "'" + name + "', Cambria, Georgia, serif"
+        : "'" + name + "', 'Open Sans', Ubuntu, 'Segoe UI', sans-serif";
+    const chosen = preview.designs.filter(d => d.id === preview.design)[0] || preview.designs[0],
+      c = chosen.colors,
+      swatches = ["accent1", "accent2", "accent3", "accent4", "accent5", "accent6"]
+        .map(k => '<span class="swatch" style="background:' + c[k] + '"></span>')
+        .join("");
+    return (
+      '<div class="design-slide" style="background:' +
+      c.lt1 +
+      ";color:" +
+      c.dk1 +
+      ";border-top-color:" +
+      c.accent1 +
+      '"><div class="design-title" style="font-family:' +
+      font(chosen.fonts.heading) +
+      '">' +
+      C.escapeHtml(chosen.name) +
+      '</div><div class="design-body" style="font-family:' +
+      font(chosen.fonts.body) +
+      '">' +
+      C.escapeHtml(
+        chosen.fonts.heading === chosen.fonts.body
+          ? chosen.fonts.body + " throughout"
+          : chosen.fonts.heading + " headings, " + chosen.fonts.body + " text"
+      ) +
+      '</div><div class="design-swatches">' +
+      swatches +
+      '</div><span class="design-foot" style="background:' +
+      c.accent2 +
+      '"></span></div>' +
+      (preview.reason ? '<p class="design-reason">' + C.escapeHtml(preview.reason) + "</p>" : "") +
+      '<div class="diff-label">Or choose another design</div><div class="design-choices">' +
+      preview.designs
+        .map(
+          d =>
+            '<button type="button" class="design-choice' +
+            (d.id === chosen.id ? " selected" : "") +
+            '" data-design="' +
+            d.id +
+            '" aria-pressed="' +
+            (d.id === chosen.id) +
+            '"><span class="design-dot" style="background:' +
+            d.colors.lt1 +
+            ";border-color:" +
+            d.colors.accent1 +
+            '"><span style="background:' +
+            d.colors.accent1 +
+            '"></span></span>' +
+            C.escapeHtml(d.name) +
+            "</button>"
+        )
+        .join("") +
+      '</div><div class="prompt-hint">Changes the theme colours, fonts and background of every slide. Undo in the editor puts the old design back.</div>'
+    );
+  }
   // The Apply button says what it will do: "Replace selection", "Insert at cursor", "Add 3 comments".
   function applyLabel(suggestion) {
     const action = G.actions[suggestion.actionId],
@@ -1033,7 +1120,9 @@
     const count = (n, one, many) => n + " " + (n === 1 ? one : many);
     if (action.id === "writer.review") return "Add " + count((preview.comments || []).length, "comment", "comments");
     if (action.id === "slides.notes") return "Add speaker notes";
-    if (action.id === "slides.new") return "Create slide";
+    if (action.id === "slides.new")
+      return (preview.slides || []).length > 1 ? "Create " + preview.slides.length + " slides" : "Create slide";
+    if (action.id === "slides.design") return "Apply design";
     if (action.editor === "word") {
       if (snapshot.target === "cursor") return "Insert at cursor";
       if ($("trackChanges").checked) return "Suggest changes";
@@ -1074,7 +1163,12 @@
         "."
       );
     if (action.id === "slides.notes") return "Added speaker notes to " + result.target.replace(/ notes$/, "") + ".";
-    if (action.id === "slides.new") return "Created 1 new slide.";
+    if (action.id === "slides.new")
+      return (
+        (result.changed === 1 ? "Created 1 new slide." : "Created " + result.changed + " new slides.") +
+        (result.plainDesign ? " This deck has the plain default design: try Design deck to give it a look." : "")
+      );
+    if (action.id === "slides.design") return "Applied the " + result.target + " to every slide.";
     if (action.id === "writer.review")
       return (
         "Added " +
@@ -1505,6 +1599,10 @@
     if (inWindow() && typeof p.sendToPlugin === "function") p.sendToPlugin("guidenReady", {});
   }
   document.addEventListener("DOMContentLoaded", () => {
+    // Key boxes are masked text inputs (see .secret in main.css). A browser that cannot mask them gets real password
+    // inputs instead, so a key is never shown in plain text.
+    const canMask = window.CSS && CSS.supports && CSS.supports("-webkit-text-security", "disc");
+    if (!canMask) document.querySelectorAll("input.secret").forEach(input => (input.type = "password"));
     $("actionGrid").addEventListener("click", e => {
       const b = e.target.closest("button[data-action]");
       if (b) selectAction(b.dataset.action);
@@ -1553,6 +1651,15 @@
     $("preview").addEventListener("click", e => {
       const b = e.target.closest("button[data-view]");
       if (b) showView(b.dataset.view);
+      const choice = e.target.closest("button[data-design]"),
+        s = state.suggestion;
+      if (choice && s && s.preview && s.preview.kind === "design" && !state.busy) {
+        // Switching design is local: no new request, and the reason no longer applies.
+        s.result.design = s.preview.design = choice.dataset.design;
+        s.preview.reason = "";
+        renderPreview(s.preview);
+        $("apply").textContent = applyLabel(s);
+      }
     });
     $("prompt").addEventListener("keydown", e => {
       if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
