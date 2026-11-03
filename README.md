@@ -161,8 +161,12 @@ it belongs to, as it is when they type it, so give each person their own key and
   slide master: theme colours, theme fonts, background and accent bars at the slide edges. Guiden suggests one for the
   deck and the preview can switch to any other without a new request. The designs are fixed, so text always contrasts
   with its background and every font ships with Euro-Office. Undo in the editor puts the old design back.
-- The API key boxes are text inputs masked with `-webkit-text-security` rather than password fields, so password
-  managers do not treat the panel as a login form and offer passwords on the instruction box.
+- The instruction and follow-up boxes are editable blocks (`contenteditable="plaintext-only"`) rather than a
+  `<textarea>` and an `<input>`. iCloud Passwords offers saved logins on any text field, and a page cannot opt out, but
+  password managers leave editable blocks alone. The API key boxes are text inputs masked with
+  `-webkit-text-security` rather than password fields, so the panel never looks like a login form.
+- The toolbar button, right-click menu and editor sidebar use the CloudCIX mark, traced from the CloudCIX favicon, with
+  lighter tints of the same blues on the dark theme.
 - The plugin uses the local Document Server plugin runtime path `../v1/plugins.js`; it does not depend on `onlyoffice.github.io` at runtime.
 - The plugin calls `https://inference.cloudcix.com/v1/guiden/chat/completions` with `model: Mistral-Medium-3.5`, `stream: true`, `response_format: {"type":"json_object"}`, and `max_tokens: 15000`. Responses stream from the service and are validated against the selected action before a preview is shown.
 - While a response is streaming, the result panel shows readable text as it arrives. Mutation controls remain hidden until the complete response passes schema and target validation.

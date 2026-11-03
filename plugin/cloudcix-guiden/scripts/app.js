@@ -1598,7 +1598,119 @@
     if (!state.busy) setStatus("", "");
     if (inWindow() && typeof p.sendToPlugin === "function") p.sendToPlugin("guidenReady", {});
   }
+  // The instruction and follow-up boxes are editable blocks, not <textarea> or <input>. iCloud Passwords offers saved
+  // logins on any text field, even a lone textarea, and a page cannot opt out of that; password managers leave
+  // editable blocks alone. This gives a block the value, placeholder and caret members of a text field, so the rest of
+  // the panel treats it as one.
+  function plainTextBox(el, multiline) {
+    try {
+      el.contentEditable = "plaintext-only";
+    } catch (_) {}
+    // Browsers without plain-text editing get an ordinary editable block; value still reads it as plain text.
+    if (el.contentEditable !== "plaintext-only") el.contentEditable = "true";
+    // Plain text of a node. A <br> or the start of a <div> or <p> is a line break, except a last <br>, which only
+    // holds an empty last line open.
+    function textOf(root) {
+      let out = "";
+      (function walk(node) {
+        node.childNodes.forEach(child => {
+          if (child.nodeType === 3) out += child.data;
+          else if (child.nodeName === "BR") {
+            if (child !== root.lastChild) out += "\n";
+          } else if (child.nodeType === 1) {
+            if (/^(DIV|P)$/.test(child.nodeName) && out && !out.endsWith("\n")) out += "\n";
+            walk(child);
+          }
+        });
+      })(root);
+      return out;
+    }
+    // Caret position as a text offset, measured from the end so that the end of the text is exactly value.length.
+    function caret(start) {
+      const sel = document.getSelection(),
+        all = textOf(el).length;
+      if (!sel || !sel.rangeCount || !el.contains(sel.getRangeAt(0).startContainer)) return all;
+      const range = sel.getRangeAt(0),
+        rest = document.createRange();
+      rest.selectNodeContents(el);
+      if (start) rest.setStart(range.startContainer, range.startOffset);
+      else rest.setStart(range.endContainer, range.endOffset);
+      return all - textOf(rest.cloneContents()).length;
+    }
+    function pointAt(offset) {
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+      let left = offset,
+        node;
+      while ((node = walker.nextNode())) {
+        if (node.nodeType === 3) {
+          if (left <= node.data.length) return [node, left];
+          left -= node.data.length;
+        } else if (node.nodeName === "BR") {
+          const index = Array.prototype.indexOf.call(node.parentNode.childNodes, node);
+          if (left === 0) return [node.parentNode, index];
+          left -= 1;
+        }
+      }
+      return [el, el.childNodes.length];
+    }
+    const sync = () => el.classList.toggle("is-empty", textOf(el) === "");
+    el.setSelectionRange = (start, end) => {
+      const range = document.createRange(),
+        a = pointAt(start),
+        b = pointAt(end);
+      range.setStart(a[0], a[1]);
+      range.setEnd(b[0], b[1]);
+      const sel = document.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    };
+    const toEnd = () => el.setSelectionRange(textOf(el).length, textOf(el).length);
+    Object.defineProperties(el, {
+      value: {
+        configurable: true,
+        get: () => textOf(el),
+        set: text => {
+          text = String(text == null ? "" : text).replace(/\r\n?/g, "\n");
+          el.textContent = multiline ? text : text.replace(/\s*\n\s*/g, " ");
+          sync();
+          if (document.activeElement === el) toEnd();
+        }
+      },
+      placeholder: {
+        configurable: true,
+        get: () => el.dataset.placeholder || "",
+        set: text => {
+          el.dataset.placeholder = text;
+          el.setAttribute("aria-placeholder", text);
+        }
+      },
+      selectionStart: { configurable: true, get: () => caret(true) },
+      selectionEnd: { configurable: true, get: () => caret(false) }
+    });
+    // Like a text field, focusing from code puts the caret at the end.
+    const focus = HTMLElement.prototype.focus;
+    el.focus = options => {
+      focus.call(el, options);
+      toEnd();
+    };
+    el.placeholder = el.dataset.placeholder || "";
+    el.addEventListener("input", sync);
+    el.addEventListener("beforeinput", e => {
+      if (!multiline && (e.inputType === "insertParagraph" || e.inputType === "insertLineBreak")) e.preventDefault();
+    });
+    // Paste as plain text; insertText keeps the browser's own undo.
+    el.addEventListener("paste", e => {
+      e.preventDefault();
+      let text = ((e.clipboardData && e.clipboardData.getData("text/plain")) || "").replace(/\r\n?/g, "\n");
+      if (!multiline) text = text.replace(/\s*\n\s*/g, " ");
+      if (text) document.execCommand("insertText", false, text);
+    });
+    sync();
+  }
   document.addEventListener("DOMContentLoaded", () => {
+    plainTextBox($("prompt"), true);
+    plainTextBox($("refineText"), false);
+    $("promptLabel").addEventListener("click", () => $("prompt").focus());
     // Key boxes are masked text inputs (see .secret in main.css). A browser that cannot mask them gets real password
     // inputs instead, so a key is never shown in plain text.
     const canMask = window.CSS && CSS.supports && CSS.supports("-webkit-text-security", "disc");

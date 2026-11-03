@@ -252,7 +252,7 @@ p {
   font-weight: 700;
 }
 
-textarea,
+.text-box,
 input.secret,
 input[type="password"],
 select {
@@ -266,7 +266,7 @@ select {
   outline: none;
 }
 
-textarea:focus,
+.text-box:focus,
 input.secret:focus,
 input[type="password"]:focus,
 select:focus {
@@ -280,9 +280,26 @@ input.secret {
   -webkit-text-security: disc;
 }
 
-textarea {
+/* The instruction and follow-up boxes are editable blocks rather than form fields, so password managers leave them
+   alone (see plainTextBox in app.js). These rules make them look and behave like text boxes. */
+.text-box {
+  position: relative;
   min-height: 96px;
+  max-height: 320px;
+  overflow-y: auto;
   resize: vertical;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: text;
+}
+.text-box.is-empty::before {
+  content: attr(data-placeholder);
+  position: absolute;
+  inset: 0;
+  padding: inherit;
+  color: #8792a2;
+  pointer-events: none;
+  overflow: hidden;
 }
 
 .controls-grid {
@@ -484,7 +501,7 @@ html.theme-dark .topbar {
 }
 html.theme-dark .group,
 html.theme-dark .status,
-html.theme-dark textarea,
+html.theme-dark .text-box,
 html.theme-dark input.secret,
 html.theme-dark input[type="password"],
 html.theme-dark select,
@@ -1131,7 +1148,7 @@ html.theme-dark .sources a,
 html.theme-dark .undo-button {
   color: var(--brand-cyan) !important;
 }
-html.theme-dark textarea::placeholder,
+html.theme-dark .text-box.is-empty::before,
 html.theme-dark input::placeholder {
   color: #9eacc0;
   opacity: 1;
@@ -1376,10 +1393,12 @@ html.theme-dark .shortcut-hint {
   display: flex;
   gap: 6px;
 }
-.refine-input input {
+.refine-input .text-box {
   flex: 1;
   min-width: 0;
   min-height: 34px;
+  max-height: 96px;
+  resize: none;
   padding: 6px 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1388,7 +1407,7 @@ html.theme-dark .shortcut-hint {
   font: inherit;
   font-size: 13px;
 }
-.refine-input input:focus {
+.refine-input .text-box:focus {
   outline: 2px solid var(--brand-cyan);
   outline-offset: 0;
 }
@@ -1450,7 +1469,7 @@ html.theme-dark .shortcut-hint {
   border-color: var(--brand-blue);
   background: var(--brand-blue);
 }
-html.theme-dark .refine-input input {
+html.theme-dark .refine-input .text-box {
   color: var(--ink);
   background: var(--surface);
 }
@@ -1620,7 +1639,7 @@ html.theme-dark mark.placeholder {
 .quick-choice {
   width: auto;
 }
-textarea {
+#prompt {
   min-height: 72px;
 }
 /* Clear sits beside the instruction's label, so the Generate button keeps the whole row. */

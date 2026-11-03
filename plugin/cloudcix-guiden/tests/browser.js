@@ -259,7 +259,7 @@ test("Translate from the menu fills in the instruction and runs straight away", 
     );
     await t.page.waitForFunction(() => !document.getElementById("resultGroup").hidden);
     await idle(t.page);
-    assert.strictEqual(await t.page.inputValue("#prompt"), instruction);
+    assert.strictEqual(await t.page.$eval("#prompt", el => el.value), instruction);
     const messages = t.requests[0].body.messages;
     assert.strictEqual(messages[messages.length - 1].content, instruction);
     assert.strictEqual(await text(t.page, "#previewBadge"), "Will change file");
@@ -305,7 +305,7 @@ test("a command that arrives while Guiden is busy replaces the running request",
     await t.page.evaluate(() => window.emit("guidenRun", { actionId: "writer.ask", run: true, instruction: "Second" }));
     await t.page.waitForFunction(() => /Second\./.test(document.getElementById("preview").textContent));
     await idle(t.page);
-    assert.strictEqual(await t.page.inputValue("#prompt"), "Second");
+    assert.strictEqual(await t.page.$eval("#prompt", el => el.value), "Second");
   } finally {
     await t.close();
   }
@@ -480,14 +480,14 @@ test("Up and Down in the instruction box step through earlier instructions", asy
     await t.page.fill("#prompt", "");
     await t.page.focus("#prompt");
     await t.page.keyboard.press("ArrowUp");
-    assert.strictEqual(await t.page.inputValue("#prompt"), "second question");
+    assert.strictEqual(await t.page.$eval("#prompt", el => el.value), "second question");
     // Place the caret directly: on macOS, Home and End scroll instead of moving it.
     await t.page.$eval("#prompt", el => el.setSelectionRange(0, 0));
     await t.page.keyboard.press("ArrowUp");
-    assert.strictEqual(await t.page.inputValue("#prompt"), "first question");
+    assert.strictEqual(await t.page.$eval("#prompt", el => el.value), "first question");
     await t.page.$eval("#prompt", el => el.setSelectionRange(el.value.length, el.value.length));
     await t.page.keyboard.press("ArrowDown");
-    assert.strictEqual(await t.page.inputValue("#prompt"), "second question");
+    assert.strictEqual(await t.page.$eval("#prompt", el => el.value), "second question");
   } finally {
     await t.close();
   }
@@ -587,15 +587,62 @@ test("one-click actions follow the selection and run straight away", async () =>
   }
 });
 
-test("the API key boxes are masked text, so password managers leave the instruction box alone", async () => {
-  const t = await open({}, "");
+test("the instruction boxes are not form fields, so password managers leave them alone", async () => {
+  const t = await open(typedKey, "");
   try {
+    // iCloud Passwords offers logins on any text field, so the panel's only text fields are the two key boxes.
+    assert.strictEqual(await t.page.$$eval("textarea", els => els.length), 0);
+    assert.deepStrictEqual(await t.page.$$eval('input:not([type="checkbox"])', els => els.map(el => el.id).sort()), [
+      "apiKey",
+      "connectKey"
+    ]);
     assert.strictEqual(await t.page.$$eval('input[type="password"]', els => els.length), 0);
     for (const id of ["connectKey", "apiKey"]) {
       const masked = await t.page.$eval("#" + id, el => getComputedStyle(el).webkitTextSecurity);
       assert.strictEqual(masked, "disc", id + " is drawn as dots");
     }
-    assert.strictEqual(await t.page.$eval("#prompt", el => el.hasAttribute("data-1p-ignore")), true);
+    for (const id of ["prompt", "refineText"])
+      assert.strictEqual(await t.page.$eval("#" + id, el => el.isContentEditable), true, id + " is editable");
+
+    // The instruction box still behaves like a text box: placeholder, lines, value, paste as plain text.
+    const box = "#prompt";
+    assert.strictEqual(
+      await t.page.$eval(box, el => el.classList.contains("is-empty") && el.placeholder.length > 0),
+      true
+    );
+    await t.page.click(box);
+    await t.page.keyboard.type("first line");
+    await t.page.keyboard.press("Enter");
+    await t.page.keyboard.type("second line");
+    assert.strictEqual(await t.page.$eval(box, el => el.value), "first line\nsecond line");
+    assert.strictEqual(await t.page.$eval(box, el => el.classList.contains("is-empty")), false);
+    await t.page.$eval(box, el => {
+      const data = new DataTransfer();
+      data.setData("text/html", "<b>bold</b>");
+      data.setData("text/plain", " pasted");
+      el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+    });
+    assert.strictEqual(await t.page.$eval(box, el => el.value), "first line\nsecond line pasted");
+    assert.strictEqual(await t.page.$eval(box, el => el.querySelector("b")), null);
+    await t.page.$eval(box, el => (el.value = ""));
+    assert.strictEqual(await t.page.$eval(box, el => el.classList.contains("is-empty")), true);
+
+    // The follow-up box is one line: Shift+Enter adds no line break, and pasted lines are joined.
+    const refine = "#refineText";
+    // It sits in the result area, hidden until there is a result; show it directly.
+    await t.page.$eval(refine, el => {
+      for (let node = el; node; node = node.parentElement) node.hidden = false;
+    });
+    await t.page.click(refine);
+    await t.page.keyboard.type("one");
+    await t.page.keyboard.press("Shift+Enter");
+    await t.page.keyboard.type(" two");
+    await t.page.$eval(refine, el => {
+      const data = new DataTransfer();
+      data.setData("text/plain", "\nthree\nfour");
+      el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+    });
+    assert.strictEqual(await t.page.$eval(refine, el => el.value), "one two three four");
     assert.deepStrictEqual(t.errors, []);
   } finally {
     await t.close();
