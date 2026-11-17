@@ -5,6 +5,10 @@ that does not match `config.json` or has no section here, and the release notes 
 
 Earlier versions (before 2.5.2) were never tagged; their entries are reconstructed from the commit history.
 
+## 2.6.0 (17 Nov 2026)
+
+- Built on Euro-Office v9.3.8 (was v9.3.7). No change to what Guiden does.
+
 ## 2.5.2 (17 Nov 2026)
 
 - No change to what Guiden does. The first release made by the new release process: merging a new version into
