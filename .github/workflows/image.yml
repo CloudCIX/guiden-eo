@@ -102,6 +102,31 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Build for testing
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: guiden-eo:test
+
+      - name: Test Guiden in the real editor
+        run: |
+          docker run -d --name guiden-eo-test -p 8080:80 -e JWT_ENABLED=false -e EXAMPLE_ENABLED=true guiden-eo:test
+          EDITOR_URL=http://localhost:8080 node tests/editor.js
+
+      - name: Keep the editor test's screenshots and logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: editor-test-results
+          path: editor-test-results/
+          if-no-files-found: ignore
+
+      - name: Editor logs
+        if: failure()
+        run: docker logs guiden-eo-test 2>&1 | tail -200 || true
+
       - name: Build and publish
         id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
