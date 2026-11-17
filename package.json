@@ -9,7 +9,7 @@
     "format:check": "prettier --check plugin/cloudcix-guiden"
   },
   "devDependencies": {
-    "playwright": "1.63.0",
-    "prettier": "3.3.3"
+    "playwright": "1.65.1",
+    "prettier": "3.10.1"
   }
 }
