@@ -235,3 +235,9 @@ npm run format:check   # npm run format rewrites the files
 The editor test (`tests/editor.js`, see its header) checks that Guiden loads in a real Euro-Office container.
 GitHub Actions runs all four on every pull request. Manual release QA is still required in Writer, Cells, and Slides
 because host API support varies between Euro-Office builds.
+
+## Licence
+
+Apache License 2.0 ([LICENSE](LICENSE)), except the ONLYOFFICE plugin runtime in `runtime/v1`, which keeps its own
+GNU AGPL v3 licence. [NOTICE](NOTICE) has the details, including that the licence gives no rights to the Guiden® or
+CloudCIX names and marks.

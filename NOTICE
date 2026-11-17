@@ -1,0 +1,17 @@
+CloudCIX Guiden® for Euro-Office
+Copyright 2026 CloudCIX
+
+Licensed under the Apache License, Version 2.0 (LICENSE), except as noted below.
+
+Guiden® and the CloudCIX name and mark are trademarks of CloudCIX. The Apache License grants no rights to use
+them (section 6).
+
+This repository includes third-party software under its own licence:
+
+  runtime/v1/plugins.js, runtime/v1/plugins-ui.js, runtime/v1/plugins.css
+    The ONLYOFFICE plugin runtime, © Ascensio System SIA, licensed under the GNU Affero General Public License
+    version 3, as each file's header states. Copied unchanged from ONLYOFFICE/onlyoffice.github.io; see
+    runtime/README.md for the exact commit.
+
+The editor image built from the Dockerfile is based on Euro-Office Document Server, which is distributed under its
+own licences.
