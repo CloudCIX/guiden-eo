@@ -1,4 +1,4 @@
-# Euro-Office v9.3.7, the version CloudCIX runs. The digest (multi-arch) is what is built; the tag is there for
+# The Euro-Office version CloudCIX runs. The digest (multi-arch) is what is built; the tag is there for
 # people and for Dependabot, which opens a pull request when Euro-Office publishes a newer version. To move by hand,
 # look the new version's digest up with:
 #   docker buildx imagetools inspect ghcr.io/euro-office/documentserver:<tag>

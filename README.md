@@ -21,8 +21,8 @@ CHANGELOG.md              what each version changed
 ## How It Ships
 
 CloudCIX runs Guiden built into the Euro-Office editor image, `ghcr.io/cloudcix/guiden-eo`. The `Dockerfile` adds the
-plugin and the ONLYOFFICE plugin runtime (`runtime/`, see [runtime/README.md](runtime/README.md)) to Euro-Office
-v9.3.7, pinned by tag and digest. The CloudCIX Euro-Office cluster runs this image from
+plugin and the ONLYOFFICE plugin runtime (`runtime/`, see [runtime/README.md](runtime/README.md)) to the Euro-Office
+version named in the `Dockerfile`, pinned by tag and digest. The CloudCIX Euro-Office cluster runs this image from
 [euro-office-deploy](https://gitlab.cloudcix.com/CloudCIX/euro-office-deploy) (`k8s/20-euro-office.yaml`), pinned
 as `ghcr.io/cloudcix/guiden-eo:<version>@sha256:<digest>`. The cluster pulls it without credentials, so the
 package must stay public.
