@@ -93,6 +93,14 @@ async function check(browser, name, ext) {
       path.join(OUT, `${name}.log`),
       [`url: ${page.url()}`, "frames:", ...page.frames().map(f => "  " + f.url()), "console:", ...log].join("\n")
     );
+    // CI logs are easier to reach than its artifacts, so print what the page held too.
+    console.error(
+      `--- ${name}: ${page.url()}\nframes:\n${page
+        .frames()
+        .map(f => "  " + f.url())
+        .join("\n")}`
+    );
+    console.error(`console (last 40):\n${log.slice(-40).join("\n")}`);
     throw new Error(`${name}: ${e.message}`);
   } finally {
     await page.close();
