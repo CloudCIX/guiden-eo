@@ -1,6 +1,12 @@
 # Builds the Euro-Office image with Guiden built in, and publishes it to ghcr.io/cloudcix/guiden-eo.
-# Pull requests are built and tested but not published. Pushes to main publish `main` and `sha-<commit>`;
-# a tag such as v2.1.0 also publishes `2.1.0`. Deployments should pin the digest the job prints.
+#
+# Releasing is automatic: a merge into main whose plugin version (plugin/cloudcix-guiden/config.json) has no tag yet
+# publishes the image as `<version>`, tags the commit `v<version>` and makes a GitHub release from CHANGELOG.md.
+# euro-office-deploy's Renovate then opens a merge request for the new version. Every push to main also publishes
+# `main` and `sha-<commit>`. Pull requests are built and tested but not published, and a pull request that changes
+# what goes into the image must raise the version.
+#
+# Third-party actions are pinned to a commit, with the version beside it; Dependabot keeps them up to date.
 name: image
 
 on:
@@ -11,18 +17,54 @@ on:
 
 permissions:
   contents: read
-  packages: write
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   image:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # to publish the image
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release: ${{ steps.version.outputs.release == 'true' || github.ref_type == 'tag' }}
+      digest: ${{ steps.build.outputs.digest }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
 
       - name: Validate
         run: make validate
 
-      - uses: actions/setup-node@v4
+      - name: Version
+        id: version
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          version="$(make -s version)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT" = pull_request ]; then
+            # A change to what goes into the image needs a new version, or it would never be released.
+            git fetch -q origin "$BASE_REF"
+            if ! git diff --quiet "origin/$BASE_REF...HEAD" -- plugin runtime Dockerfile; then
+              before="$(git show "origin/$BASE_REF:plugin/cloudcix-guiden/config.json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')"
+              if [ "$(printf '%s\n%s\n' "$before" "$version" | sort -V | tail -1)" = "$before" ]; then
+                echo "::error file=plugin/cloudcix-guiden/config.json::This changes the image, so raise the version above $before (and add a CHANGELOG.md section)"
+                exit 1
+              fi
+            fi
+          elif [ "$GITHUB_REF_TYPE" = tag ]; then
+            make check-tag TAG="$GITHUB_REF_NAME"
+          elif ! git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
 
@@ -40,17 +82,20 @@ jobs:
 
       - name: Tag names
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
           images: ghcr.io/cloudcix/guiden-eo
           tags: |
             type=ref,event=branch
             type=sha,format=short
             type=semver,pattern={{version}}
+            type=raw,value=${{ steps.version.outputs.version }},enable=${{ steps.version.outputs.release == 'true' }}
+          labels: |
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         if: github.event_name != 'pull_request'
         with:
           registry: ghcr.io
@@ -59,14 +104,41 @@ jobs:
 
       - name: Build and publish
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          provenance: mode=max
+          sbom: true
 
       - name: Digest to deploy
         if: github.event_name != 'pull_request'
-        run: echo "ghcr.io/cloudcix/guiden-eo@${{ steps.build.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
+        run: echo "ghcr.io/cloudcix/guiden-eo@${{ steps.build.outputs.digest }} (version ${{ steps.version.outputs.version }})" >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    needs: image
+    if: needs.image.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # to tag and release a new version
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Tag and release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.image.outputs.version }}
+          DIGEST: ${{ needs.image.outputs.digest }}
+        run: |
+          # This section of CHANGELOG.md, then the image to deploy.
+          awk -v v="$VERSION" '$0 ~ "^## " v " " {on=1; next} /^## / {on=0} on' CHANGELOG.md > notes.md
+          printf '\n**Image:** `ghcr.io/cloudcix/guiden-eo:%s@%s`\n' "$VERSION" "$DIGEST" >> notes.md
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            gh release edit "v$VERSION" --notes-file notes.md
+          else
+            # Creating the tag through the release, with this job's token, doesn't start another run.
+            gh release create "v$VERSION" --target "$GITHUB_SHA" --title "Guiden $VERSION" --notes-file notes.md
+          fi

@@ -1,0 +1,27 @@
+# Dependabot opens pull requests for newer versions. Nothing merges itself: a new Euro-Office base image needs the
+# manual QA in Writer, Cells and Slides that README.md ("Releasing") describes before it is released.
+version: 2
+updates:
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Dublin
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Dublin
+    groups:
+      actions:
+        patterns: ['*']
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+      timezone: Europe/Dublin
+    groups:
+      dev-tools:
+        patterns: ['*']

@@ -12,10 +12,57 @@ Browser / Euro-Office plugin
 
 ```text
 plugin/cloudcix-guiden/   ONLYOFFICE-style plugin folder
-scripts/                  installation and runtime preflight helpers
+runtime/v1/               the ONLYOFFICE plugin runtime, pinned (runtime/README.md)
+Dockerfile                the editor image: Euro-Office with Guiden built in
+scripts/                  install into a running container, for testing
+CHANGELOG.md              what each version changed
 ```
 
-## Install The Plugin
+## How It Ships
+
+CloudCIX runs Guiden built into the Euro-Office editor image, `ghcr.io/cloudcix/guiden-eo`. The `Dockerfile` adds the
+plugin and the ONLYOFFICE plugin runtime (`runtime/`, see [runtime/README.md](runtime/README.md)) to Euro-Office
+v9.3.7, pinned by tag and digest. The CloudCIX Euro-Office cluster runs this image from
+[euro-office-deploy](https://gitlab.cloudcix.com/CloudCIX/euro-office-deploy) (`k8s/20-euro-office.yaml`), pinned
+as `ghcr.io/cloudcix/guiden-eo:<version>@sha256:<digest>`. The cluster pulls it without credentials, so the
+package must stay public.
+
+GitHub Actions (`.github/workflows/image.yml`) validates, tests and builds every pull request, and publishes from
+`main` (tags `main` and `sha-<commit>`).
+
+### Releasing
+
+1. In the pull request, raise `version` in `plugin/cloudcix-guiden/config.json` and the `?v=` on the script and
+   style links in `background.html` and `index.html`, and add a section for the version to
+   [CHANGELOG.md](CHANGELOG.md). `make validate` checks all three agree; CI also refuses a pull request that changes
+   `plugin/`, `runtime/` or the `Dockerfile` without raising the version.
+2. Test in Writer, Cells and Slides on a real editor, because host API support varies between Euro-Office builds.
+3. Merge. CI publishes the image as `<version>`, tags the commit `v<version>`, and makes a GitHub release with the
+   changelog section and the image to deploy.
+4. On its next Monday run, euro-office-deploy's Renovate opens a merge request moving the cluster to the new version;
+   that repository's CONTRIBUTING.md covers the dry run and merge.
+
+Dependabot (`.github/dependabot.yml`) opens pull requests for a newer Euro-Office base image, the Actions and the
+test tools. A new Euro-Office version is a release like any other: raise the version and test it in all three
+editors first.
+
+To build by hand:
+
+```sh
+docker build -t guiden-eo .
+```
+
+Euro-Office lists the plugins it finds when it starts, so new pods show Guiden with no editor config change.
+
+The editor tells browsers to keep plugin files for a year, under a path that changes only with the Euro-Office
+version. The `?v=` links make browsers fetch the new scripts, but someone who used an older Guiden on the same
+Euro-Office version may still get the old panel page until they reload the editor with Ctrl+Shift+R (⌘+Shift+R on a
+Mac) or clear the site's cached files.
+
+## Install Into A Running Container (Testing)
+
+For a single test editor run with Docker. Anywhere pods are replaced rather than patched, such as Kubernetes, use the
+image instead: a copy made this way is lost when the container is recreated.
 
 Run these commands on the host that runs the Euro-Office/ONLYOFFICE Document Server container. The host needs Docker access; use `sudo` when your account is not in the Docker group. Copy or clone this repository onto that host first.
 
@@ -37,35 +84,13 @@ sdkjs-plugins/v1/plugins.css
 
 If those files are missing, the script stops because current Euro-Office builds may otherwise show a blank/inert plugin panel.
 
-If the runtime files are missing, install the official ONLYOFFICE plugin runtime files once:
+If the runtime files are missing, install the plugin runtime once. It copies the pinned files in `runtime/v1`:
 
 ```sh
 sudo ./scripts/install-runtime.sh euro-office
 sudo ./scripts/preflight-runtime.sh euro-office
 sudo ./scripts/install-plugin.sh euro-office
 ```
-
-## Build It Into The Image
-
-For Kubernetes, or anywhere the editor's pods are replaced rather than patched, build the plugin into the editor image
-instead of copying it into a running container. The `Dockerfile` adds the plugin and its runtime files to Euro-Office
-v9.3.7, pinned by digest.
-
-GitHub Actions (`.github/workflows/image.yml`) validates, tests and builds every pull request, and publishes
-`ghcr.io/cloudcix/guiden-eo` from `main` (tags `main` and `sha-<commit>`) and from version tags such as `v2.1.0`.
-Deploy by the digest in the job's summary, so a pod never picks up a different build.
-
-To build by hand:
-
-```sh
-docker build -t guiden-eo .
-```
-
-Euro-Office lists the plugins it finds when it starts, so new pods show Guiden with no editor config change.
-
-The editor tells browsers to keep plugin files for a year, under a path that changes only with the Euro-Office
-version. After upgrading Guiden on the same Euro-Office version, someone who used the old one may still see it until
-they reload the editor with Ctrl+Shift+R (⌘+Shift+R on a Mac) or clear the site's cached files.
 
 ## Use
 
