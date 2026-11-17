@@ -36,15 +36,18 @@ GitHub Actions (`.github/workflows/image.yml`) validates, tests and builds every
    style links in `background.html` and `index.html`, and add a section for the version to
    [CHANGELOG.md](CHANGELOG.md). `make validate` checks all three agree; CI also refuses a pull request that changes
    `plugin/`, `runtime/` or the `Dockerfile` without raising the version.
-2. Test in Writer, Cells and Slides on a real editor, because host API support varies between Euro-Office builds.
+2. CI starts the image it has built and checks, in a real Euro-Office, that Guiden loads in a new document,
+   spreadsheet and presentation, adds its toolbar tab and opens its panel (`tests/editor.js`). For a change to
+   Guiden's actions, also try them in Writer, Cells and Slides, because host API support varies between Euro-Office
+   builds.
 3. Merge. CI publishes the image as `<version>`, tags the commit `v<version>`, and makes a GitHub release with the
    changelog section and the image to deploy.
 4. On its next Monday run, euro-office-deploy's Renovate opens a merge request moving the cluster to the new version;
    that repository's CONTRIBUTING.md covers the dry run and merge.
 
 Dependabot (`.github/dependabot.yml`) opens pull requests for a newer Euro-Office base image, the Actions and the
-test tools. A new Euro-Office version is a release like any other: raise the version and test it in all three
-editors first.
+test tools. A new Euro-Office version is a release like any other: raise the version in its pull request, and CI's
+editor test checks Guiden still loads in it.
 
 To build by hand:
 
@@ -229,5 +232,6 @@ npm test && npm run test:browser
 npm run format:check   # npm run format rewrites the files
 ```
 
-GitHub Actions runs all three on every pull request. Manual release QA is still required in Writer, Cells, and Slides
+The editor test (`tests/editor.js`, see its header) checks that Guiden loads in a real Euro-Office container.
+GitHub Actions runs all four on every pull request. Manual release QA is still required in Writer, Cells, and Slides
 because host API support varies between Euro-Office builds.
