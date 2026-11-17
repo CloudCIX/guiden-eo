@@ -2,15 +2,17 @@
 // Smoke test in a real Euro-Office: opens a new document, spreadsheet and presentation in the image's example app and
 // checks that Guiden loads in each, adds its toolbar tab, and opens its panel. CI runs it against the image it has just
 // built, so a new Euro-Office version is checked before it is released. To run it by hand:
-//   docker run -d --name guiden-eo-test -p 8080:80 -e JWT_ENABLED=false -e EXAMPLE_ENABLED=true <image>
-//   EDITOR_URL=http://localhost:8080 node tests/editor.js
+//   docker run -d --name guiden-eo-test -p 80:80 -e JWT_ENABLED=false -e EXAMPLE_ENABLED=true \
+//     -e ALLOW_PRIVATE_IP_ADDRESS=true <image>
+//   EDITOR_URL=http://localhost node tests/editor.js
+// Use port 80 on both sides: the editor fetches the document from the address the browser uses.
 // On failure it saves a screenshot and the page's console for each editor under EDITOR_ARTIFACTS (default
 // editor-test-results/).
 const fs = require("fs");
 const path = require("path");
 const { chromium } = require("playwright");
 
-const BASE = (process.env.EDITOR_URL || "http://localhost:8080").replace(/\/$/, "");
+const BASE = (process.env.EDITOR_URL || "http://localhost").replace(/\/$/, "");
 const OUT = process.env.EDITOR_ARTIFACTS || "editor-test-results";
 const EDITORS = [
   ["Writer", "docx"],

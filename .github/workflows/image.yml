@@ -112,8 +112,11 @@ jobs:
 
       - name: Test Guiden in the real editor
         run: |
-          docker run -d --name guiden-eo-test -p 8080:80 -e JWT_ENABLED=false -e EXAMPLE_ENABLED=true guiden-eo:test
-          EDITOR_URL=http://localhost:8080 node tests/editor.js
+          # Port 80 on both sides: the editor fetches the example's files from the address the browser uses, and
+          # inside the container that address must reach the same server. The example's files are on a local address.
+          docker run -d --name guiden-eo-test -p 80:80 -e JWT_ENABLED=false -e EXAMPLE_ENABLED=true \
+            -e ALLOW_PRIVATE_IP_ADDRESS=true guiden-eo:test
+          EDITOR_URL=http://localhost node tests/editor.js
 
       - name: Keep the editor test's screenshots and logs
         if: failure()
