@@ -105,7 +105,6 @@ Guiden starts with the editor. It adds:
   what is selected right now: Improve, Fix, Shorter, Translate, Tone and Ask for selected text; Draft, Review
   document, Ask and Company knowledge with nothing selected; Analyse, Explain formulas, Clean up and Formula in
   spreadsheets; Shorten slide, Speaker notes, New slide, Design deck and Ask on a slide.
-
 - **Change tone** (more formal, friendlier, more concise, simpler, more confident) for selected text in documents and
   presentations, **Review with comments** for a selection or a whole document, and **Explain formulas** for cells.
 
@@ -167,7 +166,7 @@ Only `guidenApiKey` is needed; `guidenUrl` (https only) and `guidenModel` overri
 provided, Settings hides the key field and the key is never saved in the browser. The key is visible to the person
 it belongs to, as it is when they type it, so give each person their own key and never a shared one.
 
-## Notes
+## How It Works
 
 - Guiden® is a background plugin (`config.json` variation `type: "background"`) for Writer, Spreadsheet and
   Presentation. `background.html` adds the toolbar tab and right-click menu (both defined in `scripts/menus.js`) and
