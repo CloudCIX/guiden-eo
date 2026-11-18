@@ -110,6 +110,20 @@ jobs:
           load: true
           tags: guiden-eo:test
 
+      - name: Known vulnerabilities (listed in the run's summary; they don't fail the build)
+        env:
+          TRIVY: aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c
+        run: |
+          # The same check as the image-scan workflow, on the image just built, so a release's vulnerabilities can be
+          # seen before it is merged. Only image-scan fails on them (README.md, "Releasing").
+          {
+            echo '### Known HIGH and CRITICAL vulnerabilities with a fix'
+            echo '```'
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "$TRIVY" image --quiet --scanners vuln \
+              --severity HIGH,CRITICAL --ignore-unfixed guiden-eo:test || echo "(the scan failed)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Test Guiden in the real editor
         run: |
           # Port 80 on both sides: the editor fetches the example's files from the address the browser uses, and
