@@ -49,6 +49,12 @@ Dependabot (`.github/dependabot.yml`) opens pull requests for a newer Euro-Offic
 test tools. A new Euro-Office version is a release like any other: raise the version in its pull request, and CI's
 editor test checks Guiden still loads in it.
 
+Every Monday the `image-scan` workflow (`.github/workflows/image-scan.yml`) checks the newest release's image with
+Trivy for known HIGH and CRITICAL vulnerabilities that already have a fix. It fails, and GitHub emails about it, if one
+is CRITICAL. Each pull request's build lists the same for the image it built, in the run's summary, without failing.
+The fix is nearly always a newer Euro-Office base image, released like any other version. euro-office-deploy's weekly
+scan checks every image the cluster runs, this one included, with the same bar.
+
 To build by hand:
 
 ```sh

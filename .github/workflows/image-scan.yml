@@ -1,0 +1,55 @@
+# Checks the newest released image for known vulnerabilities every Monday, and whenever it is run by hand (Actions,
+# image-scan, Run workflow). Trivy looks for HIGH and CRITICAL vulnerabilities that already have a fixed version in
+# ghcr.io/cloudcix/guiden-eo:<newest release>, the image euro-office-deploy deploys. The run's summary lists them all;
+# the run fails, and GitHub emails about it, if one is CRITICAL or the image can't be scanned. The fix is nearly
+# always a newer Euro-Office base image (the Dockerfile; Dependabot proposes it), released as README.md, "Releasing",
+# says. euro-office-deploy's own weekly scan checks every image the cluster runs, this one included, with the same bar.
+#
+# Trivy runs from its own image, pinned by tag and digest. Dependabot doesn't update an image named in a script, so
+# move it by hand when euro-office-deploy's Renovate moves its copy (.gitlab-ci.yml, image-scan).
+name: image-scan
+
+on:
+  schedule:
+    - cron: '0 6 * * 1' # Monday 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  TRIVY: aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: The newest release
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          tag="$(gh release view --repo "$REPO" --json tagName --jq .tagName)"
+          echo "image=ghcr.io/cloudcix/guiden-eo:${tag#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Scan
+        env:
+          IMAGE: ${{ steps.release.outputs.image }}
+        run: |
+          trivy() { docker run --rm -v "$RUNNER_TEMP/trivy:/root/.cache/trivy" "$TRIVY" "$@"; }
+          {
+            echo "### Known HIGH and CRITICAL vulnerabilities with a fix in \`$IMAGE\`"
+            echo '```'
+            trivy image --quiet --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed "$IMAGE" || echo "(the scan failed)"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          # Exit code 2 means a CRITICAL vulnerability with a fix; anything else but 0 means Trivy couldn't scan.
+          rc=0
+          trivy image --quiet --skip-db-update --scanners vuln --severity CRITICAL --ignore-unfixed --exit-code 2 \
+            "$IMAGE" > /dev/null || rc=$?
+          case "$rc" in
+            0) echo "No CRITICAL vulnerability with a fix." ;;
+            2) echo "::error::$IMAGE has a CRITICAL vulnerability with a fix (listed above). Release a newer base image."; exit 1 ;;
+            *) echo "::error::Trivy couldn't scan $IMAGE (exit code $rc)."; exit 1 ;;
+          esac
